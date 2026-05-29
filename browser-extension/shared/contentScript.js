@@ -186,6 +186,7 @@ function snapshotElement(element, context = refreshCaptureContext()) {
   const html = truncate(clone.outerHTML || "", MAX_HTML_CHARS);
   const attributes = snapshotAttributes(element);
   const selector = cssPath(element);
+  const metadata = snapshotMetadata(context, element, { text, links });
   const snapshotHash = stableHash(
     JSON.stringify({
       url: location.href,
@@ -205,8 +206,18 @@ function snapshotElement(element, context = refreshCaptureContext()) {
     attributes,
     links,
     snapshotHash,
-    capturedAt: new Date().toISOString()
+    capturedAt: new Date().toISOString(),
+    metadata
   };
+}
+
+function snapshotMetadata(context, element, snapshot) {
+  if (!context || typeof context.metadataForElement !== "function") {
+    return null;
+  }
+
+  const metadata = context.metadataForElement(element, snapshot);
+  return metadata && typeof metadata === "object" ? metadata : null;
 }
 
 function setSnapshotCaptureContextKey(snapshot, key) {

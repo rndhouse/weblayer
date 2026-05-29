@@ -320,7 +320,15 @@ DOM analysis request shape:
         }
       ],
       "snapshotHash": "abc123",
-      "capturedAt": "2026-05-22T10:00:00.000Z"
+      "capturedAt": "2026-05-22T10:00:00.000Z",
+      "metadata": {
+        "xCom": {
+          "postId": "123",
+          "authorHandle": "@user",
+          "visibleIndex": 0,
+          "replyingToHandles": []
+        }
+      }
     }
   ]
 }

@@ -79,14 +79,23 @@ pub fn pending_dom_commands(
     _ai_analyzer: &AiAnalyzer,
     content_store: &ContentStore,
 ) -> Vec<DomCommand> {
+    let extracted_items = extract::extract_items(batch);
     let active_rules = decide::active_x_rules(content_store);
     let feedback_context = feedback_context_from_active_rules(&active_rules);
+    let decisions = extracted_items
+        .iter()
+        .filter_map(|extracted| decide::stored_dislike_decision(content_store, &extracted.item))
+        .collect();
+    let mut decisions_by_client_id: std::collections::HashMap<_, _> =
+        commands::expand_hide_decisions(&extracted_items, decisions)
+            .into_iter()
+            .map(|decision| (decision.client_id.clone(), decision))
+            .collect();
 
-    extract::extract_items(batch)
+    extracted_items
         .into_iter()
         .filter_map(|extracted| {
-            if let Some(decision) = decide::stored_dislike_decision(content_store, &extracted.item)
-            {
+            if let Some(decision) = decisions_by_client_id.remove(&extracted.item.client_id) {
                 Some(DomCommand::from_decision(
                     decision,
                     extracted.target.clone(),

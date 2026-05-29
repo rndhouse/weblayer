@@ -32,10 +32,12 @@ This creates `browser-extension/dist/chrome` and
 The extension captures content only through explicit site adapters. Unknown
 hosts, unknown page surfaces, and unknown DOM structures send nothing. The
 current adapter supports X.com and Twitter URLs for home, explore, search, and
-status-thread pages, and it captures visible top-level
-`article[data-testid="tweet"]` post regions. Quoted posts and reply/thread
-context stay inside the captured post snapshot; nested quoted-post cards are
-not targeted as separate feedback regions.
+status pages, and it captures visible top-level `article[data-testid="tweet"]`
+post regions. X snapshots include observed post metadata such as post ID,
+author handle, visible order, and `Replying to @...` handles so the daemon can
+build the visible reply tree and decide any hide cascade. Quoted posts stay
+inside the captured post snapshot; nested quoted-post cards are not targeted as
+separate feedback regions.
 
 The extension opens a WebSocket to:
 

@@ -12,6 +12,7 @@ use crate::{
     },
     storage::{ContentStore, RuleCreateInput, RuleExamples},
 };
+use serde_json::json;
 use std::path::PathBuf;
 
 fn batch(elements: Vec<DomElementSnapshot>) -> DomAnalysisBatch {
@@ -59,6 +60,7 @@ fn element_with_root(
             .unwrap_or_default(),
         snapshot_hash: Some("hash1".into()),
         captured_at: None,
+        metadata: serde_json::Value::Null,
     }
 }
 
@@ -72,6 +74,23 @@ fn data_testid_tweet_element(
         name: "data-testid".into(),
         value: "tweet".into(),
     }];
+    element
+}
+
+fn element_replying_to(
+    client_id: &str,
+    text: &str,
+    href: &str,
+    visible_index: i64,
+    handles: &[&str],
+) -> DomElementSnapshot {
+    let mut element = element(client_id, text, Some(href));
+    element.metadata = json!({
+        "xCom": {
+            "visibleIndex": visible_index,
+            "replyingToHandles": handles,
+        },
+    });
     element
 }
 
@@ -397,6 +416,81 @@ fn thumbs_down_feedback_records_state_without_hiding_immediately() {
         pending_commands[0].label.as_deref(),
         Some("WebLayer: hidden")
     );
+
+    let _ = std::fs::remove_dir_all(data_dir);
+}
+
+#[test]
+fn stored_feedback_hides_visible_reply_descendants() {
+    let (content_store, data_dir) = content_store("hide-reply-descendants");
+    let ai_analyzer = AiAnalyzer::for_tests_with_x_summaries(&[]);
+    let parent = element_replying_to(
+        "parent",
+        "Parent post",
+        "https://x.com/alice/status/111",
+        0,
+        &[],
+    );
+    let child = element_replying_to(
+        "child",
+        "Replying to @alice Child post",
+        "https://x.com/bob/status/222",
+        1,
+        &["@alice"],
+    );
+    let grandchild = element_replying_to(
+        "grandchild",
+        "Replying to @bob Grandchild post",
+        "https://x.com/carol/status/333",
+        2,
+        &["@bob"],
+    );
+    let sibling = element_replying_to(
+        "sibling",
+        "Replying to @alice Sibling reply",
+        "https://x.com/dave/status/444",
+        3,
+        &["@alice"],
+    );
+    let feedback_context_id = content_store
+        .store_x_feedback_context(&FeedbackContext::default())
+        .expect("feedback context should store");
+
+    apply_feedback(
+        &batch(vec![child.clone()]),
+        FeedbackKind::ThumbsDown,
+        "hide this branch",
+        feedback_context_id.as_str(),
+        &content_store,
+    )
+    .expect("feedback should apply");
+
+    let commands = pending_dom_commands(
+        &batch(vec![parent, child, grandchild, sibling]),
+        &ai_analyzer,
+        &content_store,
+    );
+    let hidden_client_ids: Vec<_> = commands
+        .iter()
+        .filter(|command| matches!(command.action, crate::core::DomCommandAction::Hide))
+        .map(|command| command.target.client_id.as_str())
+        .collect();
+
+    assert_eq!(hidden_client_ids, vec!["child", "grandchild"]);
+    assert!(commands.iter().any(|command| {
+        command.target.client_id == "parent"
+            && matches!(
+                command.action,
+                crate::core::DomCommandAction::InsertFeedbackControl
+            )
+    }));
+    assert!(commands.iter().any(|command| {
+        command.target.client_id == "sibling"
+            && matches!(
+                command.action,
+                crate::core::DomCommandAction::InsertFeedbackControl
+            )
+    }));
 
     let _ = std::fs::remove_dir_all(data_dir);
 }

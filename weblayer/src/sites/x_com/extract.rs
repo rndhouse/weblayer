@@ -1,5 +1,5 @@
 use crate::core::{ContentItem, DomAnalysisBatch, DomCommandTarget, DomElementSnapshot};
-use serde_json::json;
+use serde_json::{json, Value};
 use tracing::{trace, Level};
 
 pub(super) fn extract_items(batch: &DomAnalysisBatch) -> Vec<ExtractedItem> {
@@ -27,17 +27,40 @@ fn extract_item(
         return None;
     }
 
+    let metadata = x_metadata(element);
+    let metadata_post_id = metadata.and_then(|metadata| metadata_string(metadata, "postId"));
     let status_href = find_status_href(element).or_else(|| page_status_href.map(ToOwned::to_owned));
-    let post_id = status_href
-        .as_deref()
-        .and_then(x_status_id)
-        .map(ToOwned::to_owned);
-    post_id.as_ref()?;
+    let post_id = metadata_post_id.or_else(|| {
+        status_href
+            .as_deref()
+            .and_then(x_status_id)
+            .map(ToOwned::to_owned)
+    });
+    let post_id = post_id?;
 
-    let author = status_href.as_deref().and_then(author_handle);
+    let author = metadata
+        .and_then(|metadata| metadata_string(metadata, "authorHandle"))
+        .or_else(|| status_href.as_deref().and_then(author_handle));
+    let visible_index = metadata.and_then(|metadata| metadata_i64(metadata, "visibleIndex"));
+    let parent_post_id = metadata.and_then(|metadata| metadata_string(metadata, "parentPostId"));
+    let reply_ancestor_post_ids = metadata
+        .map(|metadata| metadata_string_list(metadata, "replyAncestorPostIds"))
+        .unwrap_or_default();
+    let replying_to_handles = metadata
+        .map(|metadata| metadata_string_list(metadata, "replyingToHandles"))
+        .unwrap_or_default();
+    let relationship = XPostRelationship {
+        post_id: post_id.clone(),
+        author_handle: author.clone(),
+        visible_index,
+        parent_post_id,
+        reply_ancestor_post_ids,
+        replying_to_handles,
+    };
+
     let item = ContentItem {
         client_id: element.client_id.clone(),
-        content_id: post_id,
+        content_id: Some(post_id.clone()),
         url: status_href,
         author,
         text: element.text.clone(),
@@ -53,6 +76,14 @@ fn extract_item(
             "tagName": element.tag_name,
             "role": element.role,
             "snapshotHash": element.snapshot_hash,
+            "xCom": {
+                "postId": relationship.post_id.clone(),
+                "authorHandle": relationship.author_handle.clone(),
+                "visibleIndex": relationship.visible_index,
+                "parentPostId": relationship.parent_post_id.clone(),
+                "replyAncestorPostIds": relationship.reply_ancestor_post_ids.clone(),
+                "replyingToHandles": relationship.replying_to_handles.clone(),
+            },
         }),
     };
     trace_identified_post(&item);
@@ -63,7 +94,43 @@ fn extract_item(
         must_match_snapshot_hash: element.snapshot_hash.clone(),
     };
 
-    Some(ExtractedItem { item, target })
+    Some(ExtractedItem {
+        item,
+        target,
+        relationship,
+    })
+}
+
+fn x_metadata(element: &DomElementSnapshot) -> Option<&Value> {
+    element
+        .metadata
+        .get("xCom")
+        .or_else(|| element.metadata.get("x.com"))
+}
+
+fn metadata_string(metadata: &Value, key: &str) -> Option<String> {
+    let value = metadata.get(key)?.as_str()?.trim();
+    (!value.is_empty()).then(|| value.to_string())
+}
+
+fn metadata_i64(metadata: &Value, key: &str) -> Option<i64> {
+    metadata.get(key)?.as_i64()
+}
+
+fn metadata_string_list(metadata: &Value, key: &str) -> Vec<String> {
+    metadata
+        .get(key)
+        .and_then(Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn has_post_region_evidence(element: &DomElementSnapshot) -> bool {
@@ -138,4 +205,15 @@ fn author_handle(url: &str) -> Option<String> {
 pub(super) struct ExtractedItem {
     pub(super) item: ContentItem,
     pub(super) target: DomCommandTarget,
+    pub(super) relationship: XPostRelationship,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct XPostRelationship {
+    pub(super) post_id: String,
+    pub(super) author_handle: Option<String>,
+    pub(super) visible_index: Option<i64>,
+    pub(super) parent_post_id: Option<String>,
+    pub(super) reply_ancestor_post_ids: Vec<String>,
+    pub(super) replying_to_handles: Vec<String>,
 }

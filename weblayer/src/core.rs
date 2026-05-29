@@ -107,6 +107,9 @@ pub struct DomElementSnapshot {
     /// Client-side capture timestamp.
     #[serde(default)]
     pub captured_at: Option<String>,
+    /// Extra site-specific fields that should remain outside the core schema.
+    #[serde(default)]
+    pub metadata: Value,
 }
 
 /// User feedback signal sent by the browser extension for a DOM region.
