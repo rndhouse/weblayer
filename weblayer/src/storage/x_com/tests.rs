@@ -729,6 +729,69 @@ fn tracks_rule_curation_feedback_queue() {
 }
 
 #[test]
+fn opens_legacy_feedback_state_without_rule_curation_columns() {
+    let db_path = temp_db_path("legacy-rule-curation-columns");
+    if let Some(parent) = db_path.parent() {
+        std::fs::create_dir_all(parent).expect("db parent should create");
+    }
+    {
+        let connection = rusqlite::Connection::open(&db_path).expect("legacy db should open");
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE tweet_feedback_state (
+                    storage_key TEXT PRIMARY KEY,
+                    post_id TEXT,
+                    active INTEGER NOT NULL,
+                    feedback_kind TEXT NOT NULL,
+                    reason TEXT NOT NULL,
+                    created_at_unix_ms INTEGER NOT NULL,
+                    updated_at_unix_ms INTEGER NOT NULL,
+                    latest_client_id TEXT NOT NULL,
+                    url TEXT,
+                    author_handle TEXT,
+                    latest_captured_at TEXT,
+                    latest_payload_json TEXT NOT NULL,
+                    latest_rule_context_json TEXT NOT NULL
+                );
+                ",
+            )
+            .expect("legacy table should create");
+    }
+
+    let store = Store::open(&db_path).expect("legacy store should migrate");
+    let columns = store
+        .connection
+        .prepare("PRAGMA table_info(tweet_feedback_state)")
+        .expect("table info should prepare")
+        .query_map([], |row| row.get::<_, String>(1))
+        .expect("table info should query")
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .expect("columns should load");
+    let index_exists: i64 = store
+        .connection
+        .query_row(
+            "
+            SELECT COUNT(*)
+            FROM sqlite_master
+            WHERE type = 'index'
+                AND name = 'tweet_feedback_state_rule_proposal_idx'
+            ",
+            [],
+            |row| row.get(0),
+        )
+        .expect("index count should load");
+
+    assert!(columns.iter().any(|column| column == "rule_proposal_id"));
+    assert!(columns
+        .iter()
+        .any(|column| column == "rule_proposal_at_unix_ms"));
+    assert_eq!(index_exists, 1);
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap().parent().unwrap());
+}
+
+#[test]
 fn upserts_content_annotations_by_identity() {
     let db_path = temp_db_path("upserts-annotations");
     let mut store = Store::open(&db_path).expect("store should open");

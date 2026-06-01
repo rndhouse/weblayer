@@ -93,8 +93,6 @@ pub(super) fn initialize(connection: &Connection) -> Result<()> {
         ON tweet_feedback_state(active);
     CREATE INDEX IF NOT EXISTS tweet_feedback_state_post_id_idx
         ON tweet_feedback_state(post_id);
-    CREATE INDEX IF NOT EXISTS tweet_feedback_state_rule_proposal_idx
-        ON tweet_feedback_state(rule_proposal_id);
 
     CREATE TABLE IF NOT EXISTS feedback_contexts (
         id TEXT PRIMARY KEY,
@@ -198,6 +196,13 @@ fn migrate_rule_curation(connection: &Connection) -> Result<()> {
         "tweet_feedback_state",
         "rule_proposal_at_unix_ms",
         "ALTER TABLE tweet_feedback_state ADD COLUMN rule_proposal_at_unix_ms INTEGER",
+    )?;
+    connection.execute(
+        "
+        CREATE INDEX IF NOT EXISTS tweet_feedback_state_rule_proposal_idx
+            ON tweet_feedback_state(rule_proposal_id)
+        ",
+        [],
     )?;
 
     Ok(())
