@@ -96,10 +96,11 @@
 }
 
 .weblayer-feedback-panel {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  grid-template-rows: auto auto auto;
+  column-gap: 12px;
+  row-gap: 4px;
   box-sizing: border-box;
   max-width: calc(100% - 32px);
   margin: 2px 16px 10px;
@@ -112,14 +113,15 @@
 }
 
 .weblayer-feedback-panel-label {
-  flex: 0 0 auto;
+  grid-column: 1;
+  grid-row: 1;
   color: rgb(113, 118, 123);
   font-weight: 600;
 }
 
 .weblayer-feedback-save-status {
-  flex: 0 0 auto;
-  margin-left: auto;
+  grid-column: 1;
+  grid-row: 2;
   color: rgb(113, 118, 123);
   font-size: 12px;
   white-space: nowrap;
@@ -139,7 +141,9 @@
 
 .weblayer-feedback-reason-chips {
   display: flex;
-  flex: 1 1 220px;
+  grid-column: 2;
+  grid-row: 1 / 3;
+  align-self: center;
   flex-wrap: wrap;
   gap: 6px;
   min-width: 0;
@@ -173,7 +177,8 @@
 }
 
 .weblayer-feedback-reason-input {
-  flex: 1 1 100%;
+  grid-column: 1 / -1;
+  grid-row: 3;
   min-width: 0;
   max-width: 100%;
   min-height: 44px;
