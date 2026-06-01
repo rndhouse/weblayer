@@ -365,7 +365,7 @@ metadata.
 When `WEBLAYER_X_DEBUG_STATS=1`, X/Twitter command responses also include a
 `showDebugStats` command. The command carries a `debugStats` payload with
 daemon-side storage, feedback, rule curation, and rule-catch counters for a
-debug overlay.
+debug sidebar section.
 
 WebSocket request shape:
 

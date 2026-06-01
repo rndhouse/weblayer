@@ -197,13 +197,7 @@
 }
 
 .weblayer-debug-stats-panel {
-  position: fixed;
-  top: 72px;
-  right: 16px;
-  z-index: 2147483647;
   box-sizing: border-box;
-  width: min(300px, calc(100vw - 32px));
-  max-height: calc(100vh - 96px);
   overflow: auto;
   padding: 12px;
   border: 1px solid rgba(148, 163, 184, 0.42);
@@ -212,6 +206,23 @@
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.32);
   color: rgb(226, 232, 240);
   font: 12px/1.35 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.weblayer-debug-stats-panel--inline {
+  position: relative;
+  z-index: 1;
+  width: auto;
+  max-height: none;
+  margin: 12px 0;
+}
+
+.weblayer-debug-stats-panel--overlay {
+  position: fixed;
+  top: 72px;
+  right: 16px;
+  z-index: 2147483647;
+  width: min(300px, calc(100vw - 32px));
+  max-height: calc(100vh - 96px);
 }
 
 .weblayer-debug-stats-header {
@@ -283,7 +294,7 @@
 }
 
 @media (max-width: 720px) {
-  .weblayer-debug-stats-panel {
+  .weblayer-debug-stats-panel--overlay {
     top: auto;
     right: 8px;
     bottom: 8px;

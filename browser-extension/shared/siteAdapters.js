@@ -22,6 +22,7 @@
       key: `x.com:${xComPageKind}:${url.origin}${url.pathname}${url.search}`,
       collectCandidates: () => collectXComCandidates(root),
       isSupportedElement: isSupportedXComElement,
+      debugStatsMount: () => xComDebugStatsMount(root),
       metadataForElement: (element, snapshot) => xComMetadataForElement(
         root,
         url,
@@ -56,6 +57,21 @@
 
   function collectXComCandidates(root) {
     return Array.from(root.querySelectorAll(`main ${X_COM_POST_SELECTOR}`));
+  }
+
+  function xComDebugStatsMount(root) {
+    const sidebar = root.querySelector("[data-testid='sidebarColumn']");
+    if (sidebar instanceof Element && isVisibleElement(sidebar)) {
+      return sidebar;
+    }
+
+    for (const element of root.querySelectorAll("aside, [role='complementary']")) {
+      if (element instanceof Element && isVisibleElement(element)) {
+        return element;
+      }
+    }
+
+    return null;
   }
 
   function xComMetadataForElement(root, url, pageKind, element, snapshot) {
@@ -156,6 +172,18 @@
     return (
       element.parentElement !== null &&
       element.parentElement.closest(X_COM_POST_SELECTOR) !== null
+    );
+  }
+
+  function isVisibleElement(element) {
+    const rect = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    return (
+      rect.width >= 160 &&
+      rect.height >= 1 &&
+      style.display !== "none" &&
+      style.visibility !== "hidden" &&
+      style.opacity !== "0"
     );
   }
 

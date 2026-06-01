@@ -408,6 +408,7 @@ function renderDebugStatsPanel(stats) {
     return;
   }
 
+  const mount = debugStatsMountElement();
   let panel = document.getElementById(DEBUG_STATS_PANEL_ID);
   if (!panel) {
     panel = document.createElement("aside");
@@ -415,12 +416,27 @@ function renderDebugStatsPanel(stats) {
     panel.className = "weblayer-debug-stats-panel";
     panel.dataset.weblayerUi = "true";
     panel.setAttribute("aria-live", "polite");
-    document.documentElement.append(panel);
   }
+  panel.classList.toggle("weblayer-debug-stats-panel--inline", mount !== null);
+  panel.classList.toggle("weblayer-debug-stats-panel--overlay", mount === null);
 
   panel.replaceChildren(createDebugStatsHeader(stats));
   for (const section of stats.sections) {
     panel.append(createDebugStatsSection(section));
+  }
+
+  if (mount) {
+    if (panel.parentElement !== mount) {
+      mount.prepend(panel);
+    } else if (mount.firstElementChild !== panel) {
+      mount.prepend(panel);
+    }
+    return;
+  }
+
+  const pageRoot = document.body || document.documentElement;
+  if (panel.parentElement !== pageRoot) {
+    pageRoot.append(panel);
   }
 }
 
@@ -429,6 +445,18 @@ function removeDebugStatsPanel() {
   if (panel) {
     panel.remove();
   }
+}
+
+function debugStatsMountElement() {
+  const context = currentCaptureContext();
+  if (!context || typeof context.debugStatsMount !== "function") {
+    return null;
+  }
+
+  const mount = context.debugStatsMount();
+  return mount instanceof Element && document.documentElement.contains(mount)
+    ? mount
+    : null;
 }
 
 function createDebugStatsHeader(stats) {
