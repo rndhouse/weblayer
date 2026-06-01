@@ -64,6 +64,10 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
       letter-spacing: 0;
     }
 
+    button {
+      font: inherit;
+    }
+
     .meta {
       color: var(--muted);
       font-size: 12px;
@@ -97,6 +101,42 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
 
     .panel + .panel {
       margin-top: 12px;
+    }
+
+    .panel-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .panel-heading h2 {
+      margin: 0;
+    }
+
+    .action-button {
+      flex: 0 0 auto;
+      min-height: 30px;
+      padding: 0 10px;
+      border: 1px solid var(--accent);
+      border-radius: 6px;
+      background: transparent;
+      color: var(--accent);
+      cursor: pointer;
+      font-weight: 700;
+    }
+
+    .action-button:hover,
+    .action-button:focus-visible {
+      background: rgba(125, 211, 252, 0.12);
+      outline: none;
+    }
+
+    .action-button:disabled {
+      border-color: var(--border);
+      color: var(--muted);
+      cursor: wait;
     }
 
     .stat {
@@ -223,7 +263,11 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
           <div id="feedback" class="list"></div>
         </div>
         <div class="panel">
-          <h2>Recent Rule Proposals</h2>
+          <div class="panel-heading">
+            <h2>Recent Rule Proposals</h2>
+            <button id="reviewRules" class="action-button" type="button">Review Rule Set</button>
+          </div>
+          <div id="reviewRulesStatus" class="meta" aria-live="polite"></div>
           <div id="proposals" class="list"></div>
         </div>
       </div>
@@ -235,6 +279,21 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
 
     async function json(path) {
       const response = await fetch(path, { headers: { "Accept": "application/json" } });
+      if (!response.ok) {
+        throw new Error(`${path} returned HTTP ${response.status}`);
+      }
+      return response.json();
+    }
+
+    async function postJson(path, body) {
+      const response = await fetch(path, {
+        method: "POST",
+        headers: {
+          "Accept": "application/json",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(body)
+      });
       if (!response.ok) {
         throw new Error(`${path} returned HTTP ${response.status}`);
       }
@@ -314,6 +373,27 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
       return `${proposal.source || "proposal"}; ${changes} changes; ${proposal.feedbackCount || 0} feedback rows`;
     }
 
+    async function reviewRuleSet() {
+      const button = document.getElementById("reviewRules");
+      const status = document.getElementById("reviewRulesStatus");
+      button.disabled = true;
+      status.textContent = "Reviewing rule set...";
+
+      try {
+        const response = await postJson(
+          `/v1/rule-proposals?site=${encodeURIComponent(SITE)}`,
+          { minFeedback: 1, feedbackLimit: 10 }
+        );
+        const proposal = response.proposal || {};
+        status.textContent = proposal.id ? `Created ${proposal.id}` : "Rule review complete";
+        await load();
+      } catch (error) {
+        status.textContent = error instanceof Error ? error.message : String(error);
+      } finally {
+        button.disabled = false;
+      }
+    }
+
     async function load() {
       try {
         const [stats, feedback, rules, proposals] = await Promise.all([
@@ -349,6 +429,9 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
       }
     }
 
+    document.getElementById("reviewRules").addEventListener("click", () => {
+      void reviewRuleSet();
+    });
     void load();
     setInterval(load, 15000);
   </script>
@@ -854,6 +937,8 @@ mod tests {
         assert!(html.contains("/dashboard/rules/"));
         assert!(html.contains("/v1/feedback?site="));
         assert!(html.contains("/v1/rule-proposals?site="));
+        assert!(html.contains("Review Rule Set"));
+        assert!(html.contains("method: \"POST\""));
     }
 
     #[tokio::test]
