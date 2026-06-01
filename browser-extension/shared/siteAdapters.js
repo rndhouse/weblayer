@@ -75,6 +75,11 @@
   }
 
   function xComSidebarContentMount(sidebar) {
+    const timeline = sidebar.querySelector("[aria-label^='Timeline:']");
+    if (timeline instanceof Element && isVisibleElement(timeline)) {
+      return timeline;
+    }
+
     for (const child of sidebar.children) {
       if (
         child instanceof Element &&

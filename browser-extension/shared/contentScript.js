@@ -411,7 +411,7 @@ function renderDebugStatsPanel(stats) {
   const mount = debugStatsMountElement();
   let panel = document.getElementById(DEBUG_STATS_PANEL_ID);
   if (!panel) {
-    panel = document.createElement("aside");
+    panel = document.createElement("div");
     panel.id = DEBUG_STATS_PANEL_ID;
     panel.className = "weblayer-debug-stats-panel";
     panel.dataset.weblayerUi = "true";
