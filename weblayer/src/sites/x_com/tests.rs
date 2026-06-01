@@ -1,5 +1,5 @@
 use super::{
-    apply_feedback,
+    apply_feedback, cached_dom_commands,
     decide::{cached_decide_items, reviewed_item_decision, should_ask_codex},
     extract::extract_items,
     pending_dom_commands,
@@ -10,10 +10,10 @@ use crate::{
         ContentItem, DecisionAction, DomAnalysisBatch, DomAttribute, DomElementSnapshot, DomLink,
         FeedbackContext, FeedbackKind, PageSnapshot,
     },
-    storage::{ContentStore, RuleCreateInput, RuleExamples},
+    storage::{ContentStore, RuleCreateInput, RuleExamples, XAuthorReviewState},
 };
 use serde_json::json;
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
 fn batch(elements: Vec<DomElementSnapshot>) -> DomAnalysisBatch {
     batch_with_url("https://x.com/home", elements)
@@ -135,6 +135,22 @@ fn content_store(name: &str) -> (ContentStore, PathBuf) {
     (store, data_dir)
 }
 
+fn author_states(entries: &[(&str, usize, usize)]) -> HashMap<String, XAuthorReviewState> {
+    entries
+        .iter()
+        .map(|(author, seen_count, active_feedback_count)| {
+            (
+                author.to_ascii_lowercase(),
+                XAuthorReviewState {
+                    author: author.to_ascii_lowercase(),
+                    seen_count: *seen_count,
+                    active_feedback_count: *active_feedback_count,
+                },
+            )
+        })
+        .collect()
+}
+
 #[test]
 fn extracts_x_post_from_dom_snapshot_link() {
     let batch = batch(vec![element(
@@ -237,20 +253,43 @@ fn data_testid_tweet_root_is_post_region_evidence() {
 
 #[test]
 fn posts_with_text_go_to_codex_for_review() {
-    assert!(should_ask_codex(&item("Just a normal post.", None)));
+    assert!(should_ask_codex(
+        &item("Just a normal post.", None),
+        &HashMap::new()
+    ));
 }
 
 #[test]
 fn url_only_posts_go_to_codex_for_review() {
-    assert!(should_ask_codex(&item(
-        "   ",
-        Some("https://x.com/user/status/1")
-    )));
+    assert!(should_ask_codex(
+        &item("   ", Some("https://x.com/user/status/1")),
+        &HashMap::new()
+    ));
 }
 
 #[test]
 fn empty_posts_without_url_do_not_go_to_codex() {
-    assert!(!should_ask_codex(&item("   ", None)));
+    assert!(!should_ask_codex(&item("   ", None), &HashMap::new()));
+}
+
+#[test]
+fn seen_authors_without_active_feedback_skip_codex_review() {
+    let states = author_states(&[("@user", 3, 0)]);
+
+    assert!(!should_ask_codex(
+        &content_item("current", "12345", "Seen author post"),
+        &states
+    ));
+}
+
+#[test]
+fn seen_authors_with_active_feedback_still_go_to_codex_review() {
+    let states = author_states(&[("@user", 3, 1)]);
+
+    assert!(should_ask_codex(
+        &content_item("current", "12345", "Seen author post"),
+        &states
+    ));
 }
 
 #[test]
@@ -260,8 +299,8 @@ fn cached_decisions_reuse_summary_without_showing_it() {
     let ai_analyzer =
         AiAnalyzer::for_tests_with_x_summaries(&[(&cached_item, "cached summary", 0.82)]);
 
-    let decisions =
-        cached_decide_items(&[current_item], &ai_analyzer, &[]).expect("summary should be cached");
+    let decisions = cached_decide_items(&[current_item], &ai_analyzer, &[], &HashMap::new())
+        .expect("summary should be cached");
 
     assert_eq!(decisions.len(), 1);
     assert!(matches!(decisions[0].action, DecisionAction::Keep));
@@ -274,7 +313,59 @@ fn cached_decisions_return_none_when_required_summary_is_missing() {
     let current_item = content_item("current", "12345", "Needs a summary");
     let ai_analyzer = AiAnalyzer::for_tests_with_x_summaries(&[]);
 
-    assert!(cached_decide_items(&[current_item], &ai_analyzer, &[]).is_none());
+    assert!(cached_decide_items(&[current_item], &ai_analyzer, &[], &HashMap::new()).is_none());
+}
+
+#[test]
+fn cached_decisions_keep_seen_author_without_cached_summary() {
+    let current_item = content_item("current", "12345", "Seen author post");
+    let ai_analyzer = AiAnalyzer::for_tests_with_x_summaries(&[]);
+    let states = author_states(&[("@user", 1, 0)]);
+
+    let decisions = cached_decide_items(&[current_item], &ai_analyzer, &[], &states)
+        .expect("seen clean author should not need cached summary");
+
+    assert_eq!(decisions.len(), 1);
+    assert!(matches!(decisions[0].action, DecisionAction::Keep));
+}
+
+#[test]
+fn cached_decisions_require_summary_for_seen_author_with_feedback() {
+    let current_item = content_item("current", "12345", "Seen author post");
+    let ai_analyzer = AiAnalyzer::for_tests_with_x_summaries(&[]);
+    let states = author_states(&[("@user", 1, 1)]);
+
+    assert!(cached_decide_items(&[current_item], &ai_analyzer, &[], &states).is_none());
+}
+
+#[test]
+fn cached_dom_commands_keep_seen_author_without_cached_summary() {
+    let (content_store, data_dir) = content_store("seen-author-cached-dom");
+    let ai_analyzer = AiAnalyzer::for_tests_with_x_summaries(&[]);
+    content_store
+        .record_x_batch(&crate::core::AnalysisBatch::new(
+            "x.com",
+            vec![content_item("seen", "111", "Earlier post by this author")],
+        ))
+        .expect("seen author content should store");
+
+    let commands = cached_dom_commands(
+        &batch(vec![element(
+            "client-1",
+            "New post by a previously seen author",
+            Some("https://x.com/user/status/222"),
+        )]),
+        &ai_analyzer,
+        &content_store,
+    )
+    .expect("seen clean author should not need cached summary");
+
+    assert!(commands.iter().any(|command| {
+        command.target.client_id == "client-1"
+            && matches!(command.action, crate::core::DomCommandAction::Keep)
+    }));
+
+    let _ = std::fs::remove_dir_all(data_dir);
 }
 
 #[test]

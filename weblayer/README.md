@@ -106,8 +106,9 @@ before the daemon opens storage.
 Codex app-server analysis is enabled by default. The daemon starts a local
 Codex app-server process when needed, keeps one app-server thread alive across
 requests, and asks it to evaluate captured X/Twitter posts against active
-content rules. Every captured X post with text or a URL is sent to Codex so the
-daemon can evaluate it against the active rule set.
+content rules. Captured X posts with text or a URL are sent to Codex unless the
+author has been seen before and has no active feedback on stored posts; unknown
+authors and authors with active feedback are still sent for review.
 
 Post opinions and rule proposal generation have separate Codex model, reasoning
 effort, and timeout settings. Post opinions default to `gpt-5.4-mini` with

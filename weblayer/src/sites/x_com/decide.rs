@@ -1,7 +1,7 @@
 use crate::{
     ai::{AiAction, AiAnalyzer, AiContentRule, AiOpinion},
     core::{ContentDecision, ContentItem, FeedbackContext, FeedbackKind},
-    storage::{ContentStore, RuleQuery, StorageError},
+    storage::{ContentStore, RuleQuery, StorageError, XAuthorReviewState},
 };
 use std::collections::HashMap;
 use tracing::warn;
@@ -26,10 +26,11 @@ pub(super) async fn decide_items(
     items: &[ContentItem],
     ai_analyzer: &AiAnalyzer,
     active_rules: &[AiContentRule],
+    author_states: &HashMap<String, XAuthorReviewState>,
 ) -> Vec<ContentDecision> {
     let ai_items: Vec<_> = items
         .iter()
-        .filter(|item| should_ask_codex(item))
+        .filter(|item| should_ask_codex(item, author_states))
         .cloned()
         .collect();
 
@@ -135,10 +136,11 @@ pub(super) fn cached_decide_items(
     items: &[ContentItem],
     ai_analyzer: &AiAnalyzer,
     active_rules: &[AiContentRule],
+    author_states: &HashMap<String, XAuthorReviewState>,
 ) -> Option<Vec<ContentDecision>> {
     let ai_items: Vec<_> = items
         .iter()
-        .filter(|item| should_ask_codex(item))
+        .filter(|item| should_ask_codex(item, author_states))
         .cloned()
         .collect();
     let mut opinions_by_id: HashMap<_, _> = if ai_items.is_empty() {
@@ -155,7 +157,7 @@ pub(super) fn cached_decide_items(
     for item in items {
         if let Some(opinion) = opinions_by_id.remove(&item.client_id) {
             decisions.push(reviewed_item_decision(opinion));
-        } else if should_ask_codex(item) {
+        } else if should_ask_codex(item, author_states) {
             return None;
         } else {
             decisions.push(ContentDecision::keep(item.client_id.clone()));
@@ -192,8 +194,21 @@ pub(super) fn reviewed_item_decision(opinion: AiOpinion) -> ContentDecision {
     }
 }
 
-pub(super) fn should_ask_codex(item: &ContentItem) -> bool {
-    has_prompt_content(item)
+pub(super) fn should_ask_codex(
+    item: &ContentItem,
+    author_states: &HashMap<String, XAuthorReviewState>,
+) -> bool {
+    if !has_prompt_content(item) {
+        return false;
+    }
+
+    let Some(author) = item.author.as_deref().and_then(normalize_author_handle) else {
+        return true;
+    };
+
+    !author_states
+        .get(author.as_str())
+        .is_some_and(|state| state.seen_count > 0 && state.active_feedback_count == 0)
 }
 
 fn has_prompt_content(item: &ContentItem) -> bool {
@@ -202,4 +217,9 @@ fn has_prompt_content(item: &ContentItem) -> bool {
             .url
             .as_deref()
             .is_some_and(|url| !url.trim().is_empty())
+}
+
+fn normalize_author_handle(author: &str) -> Option<String> {
+    let author = author.trim();
+    (!author.is_empty()).then(|| author.to_ascii_lowercase())
 }

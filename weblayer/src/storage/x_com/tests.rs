@@ -141,6 +141,80 @@ fn content_stats_count_unique_posts_and_encounters() {
 }
 
 #[test]
+fn author_review_states_count_seen_posts_and_active_feedback() {
+    let db_path = temp_db_path("author-review-states");
+    let mut store = Store::open(&db_path).expect("store should open");
+    let mut first_alice = item("client-1", Some("123"), "first alice post");
+    first_alice.author = Some("@Alice".into());
+    let mut second_alice = item("client-2", Some("456"), "second alice post");
+    second_alice.author = Some("@alice".into());
+    let mut bob = item("client-3", Some("789"), "bob post");
+    bob.author = Some("@bob".into());
+
+    store
+        .record_batch(&batch(
+            "x.com",
+            vec![first_alice.clone(), second_alice, bob],
+        ))
+        .expect("batch should store");
+
+    let states = store
+        .author_review_states(&["@ALICE".into(), "@missing".into()])
+        .expect("author review states should load");
+    let alice = states.get("@alice").expect("alice state should exist");
+    let missing = states
+        .get("@missing")
+        .expect("missing author state should exist");
+
+    assert_eq!(alice.seen_count, 2);
+    assert_eq!(alice.active_feedback_count, 0);
+    assert_eq!(missing.seen_count, 0);
+    assert_eq!(missing.active_feedback_count, 0);
+
+    store
+        .record_feedback_with_context(
+            &first_alice,
+            FeedbackKind::ThumbsDown,
+            "too much noise",
+            &feedback_context(),
+        )
+        .expect("feedback should store");
+
+    let states = store
+        .author_review_states(&["@alice".into()])
+        .expect("author review states should load");
+    assert_eq!(
+        states
+            .get("@alice")
+            .expect("alice state should exist")
+            .active_feedback_count,
+        1
+    );
+
+    store
+        .record_feedback_with_context(
+            &first_alice,
+            FeedbackKind::UndoThumbsDown,
+            "",
+            &feedback_context(),
+        )
+        .expect("undo should store");
+
+    let states = store
+        .author_review_states(&["@alice".into()])
+        .expect("author review states should load");
+    assert_eq!(
+        states
+            .get("@alice")
+            .expect("alice state should exist")
+            .active_feedback_count,
+        0
+    );
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap().parent().unwrap());
+}
+
+#[test]
 fn records_rule_decision_events_and_stats() {
     let db_path = temp_db_path("records-decision-events");
     let mut store = Store::open(&db_path).expect("store should open");

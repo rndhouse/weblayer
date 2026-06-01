@@ -4,6 +4,7 @@ use crate::core::{AnalysisBatch, ContentItem, FeedbackContext, FeedbackKind};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
+    collections::HashMap,
     fmt,
     io::ErrorKind,
     path::{Path, PathBuf},
@@ -110,6 +111,18 @@ pub struct ContentStats {
     pub first_seen_at_unix_ms: Option<i64>,
     /// Latest time any row in this scope was seen.
     pub last_seen_at_unix_ms: Option<i64>,
+}
+
+/// Stored author-level state used to decide whether an X/Twitter author needs review.
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct XAuthorReviewState {
+    /// Normalized author handle used as the lookup key.
+    pub author: String,
+    /// Total stored post encounters for this author.
+    pub seen_count: usize,
+    /// Active feedback rows attached to posts by this author.
+    pub active_feedback_count: usize,
 }
 
 /// Aggregated final-decision counts for one content rule.
@@ -854,6 +867,18 @@ impl ContentStore {
             .lock()
             .expect("X storage mutex should not be poisoned");
         db.content_stats()
+    }
+
+    /// Returns author-level X/Twitter review state keyed by normalized handle.
+    pub fn x_author_review_states(
+        &self,
+        authors: &[String],
+    ) -> Result<HashMap<String, XAuthorReviewState>> {
+        let db = self
+            .x_com
+            .lock()
+            .expect("X storage mutex should not be poisoned");
+        db.author_review_states(authors)
     }
 
     /// Stores one final X/Twitter content decision event when it is useful for rule stats.

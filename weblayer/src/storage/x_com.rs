@@ -92,6 +92,10 @@ fn clean_optional(value: Option<&str>) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
+fn normalize_author_handle(value: &str) -> Option<String> {
+    clean_optional(Some(value)).map(|value| value.to_ascii_lowercase())
+}
+
 fn normalize_text(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }

@@ -1,14 +1,15 @@
 use super::super::Result;
 use super::{
-    clean_optional, normalize_text, now_unix_ms, sqlite_limit, stable_hash, stable_post_id,
-    storage_key, Store,
+    clean_optional, normalize_author_handle, normalize_text, now_unix_ms, sqlite_limit,
+    stable_hash, stable_post_id, storage_key, Store,
 };
 use crate::{
     core::{AnalysisBatch, ContentItem},
-    storage::{ContentPage, ContentQuery, ContentStats, StoredContentItem},
+    storage::{ContentPage, ContentQuery, ContentStats, StoredContentItem, XAuthorReviewState},
 };
 use rusqlite::{params, Row};
 use serde::Serialize;
+use std::collections::HashMap;
 use tracing::debug;
 
 impl Store {
@@ -111,6 +112,54 @@ impl Store {
                 })
             },
         )?)
+    }
+
+    pub(in crate::storage) fn author_review_states(
+        &self,
+        authors: &[String],
+    ) -> Result<HashMap<String, XAuthorReviewState>> {
+        let mut states = HashMap::new();
+
+        for author in authors {
+            let Some(author) = normalize_author_handle(author) else {
+                continue;
+            };
+
+            states
+                .entry(author.clone())
+                .or_insert_with(|| XAuthorReviewState {
+                    author,
+                    ..XAuthorReviewState::default()
+                });
+        }
+
+        for state in states.values_mut() {
+            let seen_count = self.connection.query_row(
+                "
+                SELECT COALESCE(SUM(seen_count), 0)
+                FROM tweets
+                WHERE LOWER(author_handle) = ?1
+                ",
+                params![state.author.as_str()],
+                |row| row.get::<_, i64>(0),
+            )?;
+            let active_feedback_count = self.connection.query_row(
+                "
+                SELECT COUNT(*)
+                FROM tweet_feedback_state state
+                LEFT JOIN tweets ON tweets.storage_key = state.storage_key
+                WHERE state.active = 1
+                    AND LOWER(COALESCE(state.author_handle, tweets.author_handle)) = ?1
+                ",
+                params![state.author.as_str()],
+                |row| row.get::<_, i64>(0),
+            )?;
+
+            state.seen_count = seen_count.max(0) as usize;
+            state.active_feedback_count = active_feedback_count.max(0) as usize;
+        }
+
+        Ok(states)
     }
 
     pub(in crate::storage) fn content(&self, query: ContentQuery) -> Result<ContentPage> {

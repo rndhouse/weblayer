@@ -10,8 +10,9 @@ use crate::{
         AnalysisBatch, DomAnalysisBatch, DomCommand, FeedbackContext, FeedbackKind,
         FeedbackRuleContext,
     },
-    storage::{ContentStore, StorageError},
+    storage::{ContentStore, StorageError, XAuthorReviewState},
 };
+use std::collections::HashMap;
 use tracing::warn;
 
 /// Interprets X/Twitter DOM snapshots and returns browser DOM commands.
@@ -26,11 +27,18 @@ pub async fn analyze_dom(
     }
 
     let content_batch = content_batch_from_extracted(&extracted_items);
+    let author_states = author_review_states(content_store, &content_batch.items);
     record_content_batch(content_store, &content_batch);
 
     let active_rules = decide::active_x_rules(content_store);
     let feedback_context = feedback_context_from_active_rules(&active_rules);
-    let decisions = decide::decide_items(&content_batch.items, ai_analyzer, &active_rules).await;
+    let decisions = decide::decide_items(
+        &content_batch.items,
+        ai_analyzer,
+        &active_rules,
+        &author_states,
+    )
+    .await;
     let decisions = decide::apply_stored_feedback(content_store, &content_batch.items, decisions);
     decide::record_decision_events(
         content_store,
@@ -53,9 +61,15 @@ pub fn cached_dom_commands(
     }
 
     let content_batch = content_batch_from_extracted(&extracted_items);
+    let author_states = author_review_states(content_store, &content_batch.items);
     let active_rules = decide::active_x_rules(content_store);
     let feedback_context = feedback_context_from_active_rules(&active_rules);
-    let decisions = decide::cached_decide_items(&content_batch.items, ai_analyzer, &active_rules)?;
+    let decisions = decide::cached_decide_items(
+        &content_batch.items,
+        ai_analyzer,
+        &active_rules,
+        &author_states,
+    )?;
     let decisions = decide::apply_stored_feedback(content_store, &content_batch.items, decisions);
     record_content_batch(content_store, &content_batch);
     decide::record_decision_events(
@@ -189,5 +203,23 @@ fn content_batch_from_extracted(extracted_items: &[extract::ExtractedItem]) -> A
 fn record_content_batch(content_store: &ContentStore, content_batch: &AnalysisBatch) {
     if let Err(error) = content_store.record_x_batch(content_batch) {
         warn!(%error, "failed to store X content");
+    }
+}
+
+fn author_review_states(
+    content_store: &ContentStore,
+    items: &[crate::core::ContentItem],
+) -> HashMap<String, XAuthorReviewState> {
+    let authors = items
+        .iter()
+        .filter_map(|item| item.author.clone())
+        .collect::<Vec<_>>();
+
+    match content_store.x_author_review_states(&authors) {
+        Ok(states) => states,
+        Err(error) => {
+            warn!(%error, "failed to load X author review state");
+            HashMap::new()
+        }
     }
 }
