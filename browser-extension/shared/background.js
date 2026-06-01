@@ -2,6 +2,7 @@ const DEFAULT_DAEMON_ORIGIN = "http://127.0.0.1:17891";
 const ANALYZE_PATH = "/v1/dom/analyze";
 const FEEDBACK_PATH = "/v1/dom/feedback";
 const EVENTS_PATH = "/v1/events";
+const DASHBOARD_PATH = "/dashboard";
 const REQUEST_TIMEOUT_MS = 20000;
 const MAX_ELEMENTS_PER_REQUEST = 16;
 const REQUEST_GC_MS = 60000;
@@ -89,6 +90,7 @@ async function sendAnalyzeDomOverSocket(origin, tabId, body) {
     }, PENDING_RESPONSE_TIMEOUT_MS);
 
     pendingRequests.set(requestId, {
+      daemonOrigin: normalizeOrigin(origin),
       tabId,
       timeoutId,
       pendingTimeoutId,
@@ -113,7 +115,7 @@ async function analyzeDomOverRest(origin, body) {
     throw new Error("Daemon response must include a commands array.");
   }
 
-  return response.commands.map(normalizeCommand);
+  return response.commands.map((command) => normalizeCommand(command, origin));
 }
 
 async function sendFeedback(message) {
@@ -136,7 +138,7 @@ async function sendFeedback(message) {
     throw new Error("Daemon response must include a commands array.");
   }
 
-  return response.commands.map(normalizeCommand);
+  return response.commands.map((command) => normalizeCommand(command, settings.daemonOrigin));
 }
 
 function ensureSocket(origin) {
@@ -214,7 +216,7 @@ function handleSocketMessage(data) {
   }
 
   const commands = Array.isArray(event.commands)
-    ? event.commands.map(normalizeCommand)
+    ? event.commands.map((command) => normalizeCommand(command, pendingRequest.daemonOrigin))
     : [];
   let shouldPush = true;
 
@@ -316,7 +318,7 @@ function normalizeLink(link) {
   };
 }
 
-function normalizeCommand(command) {
+function normalizeCommand(command, daemonOrigin = DEFAULT_DAEMON_ORIGIN) {
   const action = stringOrEmpty(command.action);
   const allowedActions = new Set([
     "keep",
@@ -348,12 +350,12 @@ function normalizeCommand(command) {
       ? command.matchedRuleIds.map(stringOrEmpty).filter(Boolean)
       : [],
     debugStats: normalizedAction === "showDebugStats"
-      ? normalizeDebugStats(command.debugStats)
+      ? normalizeDebugStats(command.debugStats, daemonOrigin)
       : null
   };
 }
 
-function normalizeDebugStats(stats) {
+function normalizeDebugStats(stats, daemonOrigin) {
   if (!stats || typeof stats !== "object") {
     return null;
   }
@@ -361,6 +363,7 @@ function normalizeDebugStats(stats) {
   return {
     site: stringOrEmpty(stats.site),
     title: stringOrEmpty(stats.title) || "WebLayer stats",
+    dashboardUrl: safeDashboardUrl(stats.dashboardUrl, daemonOrigin),
     generatedAtUnixMs: Number.isFinite(stats.generatedAtUnixMs)
       ? stats.generatedAtUnixMs
       : null,
@@ -370,6 +373,28 @@ function normalizeDebugStats(stats) {
       ))
       : []
   };
+}
+
+function safeDashboardUrl(value, daemonOrigin) {
+  const normalizedOrigin = normalizeOrigin(daemonOrigin);
+  const candidate = stringOrNull(value);
+
+  if (candidate) {
+    try {
+      const url = new URL(candidate);
+      if (url.origin === normalizedOrigin) {
+        return url.href;
+      }
+    } catch (_error) {
+      // Fall back to the configured local daemon origin.
+    }
+  }
+
+  return dashboardUrl(normalizedOrigin);
+}
+
+function dashboardUrl(origin) {
+  return `${normalizeOrigin(origin)}${DASHBOARD_PATH}`;
 }
 
 function normalizeDebugStatsSection(section) {

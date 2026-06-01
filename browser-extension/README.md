@@ -137,9 +137,10 @@ Supported actions are `keep`, `hide`, `dim`, `insertLabel`,
 `insertFeedbackControl`, `replaceText`, and `showDebugStats`. `showDebugStats`
 is emitted only when the daemon enables X debug stats and carries a structured
 `debugStats` payload for a small X sidebar section, falling back to a page
-overlay when no sidebar is available. The extension decides only which site
-content surfaces may be captured. It does not make filtering decisions; the
-daemon interprets captured content and decides what commands to return.
+overlay when no sidebar is available. The section links to the local daemon
+dashboard. The extension decides only which site content surfaces may be
+captured. It does not make filtering decisions; the daemon interprets captured
+content and decides what commands to return.
 
 Feedback request shape:
 

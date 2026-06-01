@@ -54,6 +54,7 @@ WEBLAYER_X_DEBUG_STATS=1 weblayer daemon
 ## Endpoints
 
 - `GET /health`
+- `GET /dashboard`
 - `GET /v1/events`
 - `POST /v1/dom/analyze`
 - `POST /v1/dom/feedback`

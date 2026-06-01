@@ -178,6 +178,7 @@ RUST_LOG=debug
 ## API Reference
 
 - `GET /health`
+- `GET /dashboard`
 - `GET /v1/events`
 - `POST /v1/dom/analyze`
 - `POST /v1/dom/feedback`
@@ -365,7 +366,9 @@ metadata.
 When `WEBLAYER_X_DEBUG_STATS=1`, X/Twitter command responses also include a
 `showDebugStats` command. The command carries a `debugStats` payload with
 daemon-side storage, feedback, rule curation, and rule-catch counters for a
-debug sidebar section.
+debug sidebar section. The sidebar links to `/dashboard`, a local daemon page
+that summarizes X content stats, active rules, active feedback, and recent
+rule proposals.
 
 WebSocket request shape:
 

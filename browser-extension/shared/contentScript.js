@@ -463,18 +463,39 @@ function createDebugStatsHeader(stats) {
   const header = document.createElement("div");
   const title = document.createElement("div");
   const meta = document.createElement("div");
+  const actions = document.createElement("div");
 
   header.className = "weblayer-debug-stats-header";
   header.dataset.weblayerUi = "true";
   title.className = "weblayer-debug-stats-title";
   title.dataset.weblayerUi = "true";
   title.textContent = stats.title || "WebLayer stats";
+  actions.className = "weblayer-debug-stats-actions";
+  actions.dataset.weblayerUi = "true";
   meta.className = "weblayer-debug-stats-meta";
   meta.dataset.weblayerUi = "true";
   meta.textContent = debugStatsMeta(stats);
+  actions.append(meta);
+  if (stats.dashboardUrl) {
+    actions.append(createDebugStatsDashboardLink(stats.dashboardUrl));
+  }
 
-  header.append(title, meta);
+  header.append(title, actions);
   return header;
+}
+
+function createDebugStatsDashboardLink(url) {
+  const link = document.createElement("a");
+  link.className = "weblayer-debug-stats-link";
+  link.dataset.weblayerUi = "true";
+  link.href = url;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  link.textContent = "Dashboard";
+  link.addEventListener("click", (event) => {
+    event.stopPropagation();
+  });
+  return link;
 }
 
 function debugStatsMeta(stats) {

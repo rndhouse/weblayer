@@ -244,10 +244,31 @@
 }
 
 .weblayer-debug-stats-meta {
-  flex: 0 0 auto;
   color: rgb(125, 211, 252);
   font-size: 11px;
   white-space: nowrap;
+}
+
+.weblayer-debug-stats-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: flex-end;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.weblayer-debug-stats-link {
+  color: rgb(167, 243, 208);
+  font-size: 11px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.weblayer-debug-stats-link:hover,
+.weblayer-debug-stats-link:focus-visible {
+  color: rgb(125, 211, 252);
+  text-decoration: underline;
+  outline: none;
 }
 
 .weblayer-debug-stats-section + .weblayer-debug-stats-section {

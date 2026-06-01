@@ -1,4 +1,5 @@
 mod content;
+mod dashboard;
 mod dom;
 mod error;
 mod events;
@@ -37,6 +38,7 @@ pub fn router() -> Result<Router, StorageError> {
 
     Ok(Router::new()
         .route("/health", get(health))
+        .route("/dashboard", get(dashboard::dashboard))
         .route("/v1/events", get(events::events_ws))
         .route("/v1/dom/analyze", post(dom::analyze_dom))
         .route("/v1/dom/feedback", post(dom::dom_feedback))
