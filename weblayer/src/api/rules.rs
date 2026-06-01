@@ -7,8 +7,8 @@ use super::{
 use crate::storage::{
     ContentRule, RuleAuditEvent, RuleCatch, RuleCatchQuery, RuleCreateInput, RuleExamples,
     RuleQuery, RuleSetProposal, RuleSetProposalAction, RuleSetProposalChange,
-    RuleSetProposalCreateInput, RuleSetProposalQuery, RuleStatusInput, RuleSuggestion,
-    RuleSuggestionQuery, RuleUpdateInput, RuleValidationMatch, XDislikeQuery,
+    RuleSetProposalCreateInput, RuleSetProposalDecision, RuleSetProposalQuery, RuleStatusInput,
+    RuleSuggestion, RuleSuggestionQuery, RuleUpdateInput, RuleValidationMatch, XDislikeQuery,
 };
 use axum::{
     extract::{Path as AxumPath, Query, State},
@@ -170,6 +170,31 @@ pub(super) async fn rule_set_proposal(
     Ok(Json(RuleSetProposalDetailResponse {
         site: site.as_str(),
         proposal,
+    }))
+}
+
+pub(super) async fn decide_rule_set_proposal(
+    State(state): State<AppState>,
+    AxumPath(proposal_id): AxumPath<String>,
+    Query(query): Query<RuleSiteQuery>,
+    Json(request): Json<DecideRuleSetProposalRequest>,
+) -> Result<Json<RuleSetProposalDecisionResponse>, ApiError> {
+    let site = SiteScope::from_param(query.site.as_deref())?;
+    let decision = rule_set_proposal_decision(&request.action)?;
+    let source = clean_query_value(request.source).unwrap_or_else(|| "dashboard".into());
+    let result = match site {
+        SiteScope::XCom => {
+            state
+                .content_store
+                .x_decide_rule_set_proposal(&proposal_id, decision, &source)?
+        }
+    }
+    .ok_or_else(|| ApiError::not_found(format!("rule proposal not found: {proposal_id}")))?;
+
+    Ok(Json(RuleSetProposalDecisionResponse {
+        site: site.as_str(),
+        proposal: result.proposal,
+        changed_rules: result.changed_rules,
     }))
 }
 
@@ -547,6 +572,15 @@ pub(super) struct CreateRuleSetProposalRequest {
     feedback_limit: Option<usize>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct DecideRuleSetProposalRequest {
+    /// Decision to make, either `apply` or `dismiss`.
+    action: String,
+    /// Source making the decision. Defaults to `dashboard`.
+    source: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct RuleDetailResponse {
@@ -574,6 +608,14 @@ pub(super) struct RuleSetProposalMutationResponse {
 pub(super) struct RuleSetProposalDetailResponse {
     site: &'static str,
     proposal: RuleSetProposal,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct RuleSetProposalDecisionResponse {
+    site: &'static str,
+    proposal: RuleSetProposal,
+    changed_rules: Vec<ContentRule>,
 }
 
 #[derive(Debug, Serialize)]
@@ -623,6 +665,16 @@ fn clean_rule_example_list(examples: Vec<String>) -> Vec<String> {
         .map(|example| example.trim().to_string())
         .filter(|example| !example.is_empty())
         .collect()
+}
+
+fn rule_set_proposal_decision(action: &str) -> Result<RuleSetProposalDecision, ApiError> {
+    match action.trim().to_ascii_lowercase().as_str() {
+        "apply" | "accept" => Ok(RuleSetProposalDecision::Apply),
+        "dismiss" | "reject" => Ok(RuleSetProposalDecision::Dismiss),
+        action => Err(ApiError::bad_request(format!(
+            "unsupported rule proposal action: {action}"
+        ))),
+    }
 }
 
 fn heuristic_changes_from_suggestions(

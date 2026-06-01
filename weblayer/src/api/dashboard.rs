@@ -8,6 +8,10 @@ pub(super) async fn rule_dashboard() -> Html<&'static str> {
     Html(RULE_DASHBOARD_HTML)
 }
 
+pub(super) async fn proposal_dashboard() -> Html<&'static str> {
+    Html(PROPOSAL_DASHBOARD_HTML)
+}
+
 pub(super) async fn posts_dashboard() -> Html<&'static str> {
     Html(POSTS_DASHBOARD_HTML)
 }
@@ -433,7 +437,12 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
         renderList(
           "proposals",
           proposals.items,
-          (proposal) => item(proposal.id, proposalSummary(proposal), proposal.status),
+          (proposal) => item(
+            proposal.id,
+            proposalSummary(proposal),
+            proposal.status,
+            `/dashboard/proposals/${encodeURIComponent(proposal.id)}`
+          ),
           "No rule proposals."
         );
         document.getElementById("updated").textContent = `Updated ${new Date().toLocaleTimeString()}`;
@@ -940,6 +949,538 @@ const RULE_DASHBOARD_HTML: &str = r##"<!doctype html>
 </html>
 "##;
 
+const PROPOSAL_DASHBOARD_HTML: &str = r##"<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WebLayer Rule Proposal</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #0f172a;
+      --panel: #111827;
+      --panel-2: #172033;
+      --border: #334155;
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --accent: #7dd3fc;
+      --ok: #86efac;
+      --warn: #fca5a5;
+      font: 14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    main {
+      width: min(1180px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 28px 0 40px;
+    }
+
+    header {
+      display: grid;
+      gap: 8px;
+      margin-bottom: 18px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 24px;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 0 0 12px;
+      font-size: 15px;
+      letter-spacing: 0;
+    }
+
+    button {
+      font: inherit;
+    }
+
+    .meta, .body {
+      color: var(--muted);
+    }
+
+    .meta {
+      font-size: 12px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
+      gap: 12px;
+    }
+
+    .panel, .stat {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.22);
+    }
+
+    .panel {
+      padding: 14px;
+      min-width: 0;
+    }
+
+    .panel + .panel {
+      margin-top: 12px;
+    }
+
+    .stat {
+      padding: 12px;
+    }
+
+    .stat-label {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .stat-value {
+      margin-top: 4px;
+      font-size: 24px;
+      font-weight: 700;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .action-button {
+      min-height: 32px;
+      padding: 0 10px;
+      border: 1px solid var(--accent);
+      border-radius: 6px;
+      background: transparent;
+      color: var(--accent);
+      cursor: pointer;
+      font-weight: 700;
+    }
+
+    .reject-button {
+      border-color: var(--warn);
+      color: var(--warn);
+    }
+
+    .action-button:hover,
+    .action-button:focus-visible {
+      background: rgba(125, 211, 252, 0.12);
+      outline: none;
+    }
+
+    .reject-button:hover,
+    .reject-button:focus-visible {
+      background: rgba(252, 165, 165, 0.12);
+    }
+
+    .action-button:disabled {
+      border-color: var(--border);
+      color: var(--muted);
+      cursor: default;
+    }
+
+    .list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .item {
+      padding: 10px;
+      border: 1px solid rgba(148, 163, 184, 0.22);
+      border-radius: 6px;
+      background: var(--panel-2);
+    }
+
+    .item-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      font-weight: 700;
+    }
+
+    .pill {
+      flex: 0 0 auto;
+      color: var(--ok);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .body {
+      margin-top: 8px;
+      overflow-wrap: anywhere;
+    }
+
+    .detail-row {
+      display: grid;
+      grid-template-columns: 132px minmax(0, 1fr);
+      gap: 10px;
+      margin-top: 6px;
+    }
+
+    .line {
+      color: var(--muted);
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+    }
+
+    .line-label {
+      color: var(--text);
+      font-weight: 700;
+    }
+
+    .empty, .error {
+      color: var(--muted);
+      padding: 10px;
+    }
+
+    .error {
+      color: var(--warn);
+    }
+
+    a {
+      color: var(--accent);
+    }
+
+    @media (max-width: 840px) {
+      main {
+        width: min(100vw - 20px, 680px);
+        padding-top: 18px;
+      }
+
+      .layout, .grid {
+        display: block;
+      }
+
+      .stat, .panel {
+        margin-top: 12px;
+      }
+
+      .detail-row {
+        display: block;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <a href="/dashboard">Dashboard</a>
+      <h1 id="proposalTitle">Rule Proposal</h1>
+      <div id="proposalMeta" class="meta">Loading...</div>
+    </header>
+
+    <section class="grid" aria-label="Proposal stats">
+      <div class="stat"><div class="stat-label">Status</div><div id="proposalStatus" class="stat-value">-</div></div>
+      <div class="stat"><div class="stat-label">Feedback rows</div><div id="feedbackCount" class="stat-value">-</div></div>
+      <div class="stat"><div class="stat-label">Active rules read</div><div id="activeRuleCount" class="stat-value">-</div></div>
+      <div class="stat"><div class="stat-label">Changes</div><div id="changeCount" class="stat-value">-</div></div>
+    </section>
+
+    <section class="layout">
+      <div>
+        <div class="panel">
+          <h2>Proposed Changes</h2>
+          <div id="changes" class="list"></div>
+        </div>
+      </div>
+
+      <div>
+        <div class="panel">
+          <h2>Manual Decision</h2>
+          <div class="actions">
+            <button id="applyProposal" class="action-button" type="button">Accept Proposal</button>
+            <button id="dismissProposal" class="action-button reject-button" type="button">Reject Proposal</button>
+          </div>
+          <div id="decisionStatus" class="meta" aria-live="polite"></div>
+        </div>
+        <div class="panel">
+          <h2>Changed Rules</h2>
+          <div id="changedRules" class="list"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const SITE = "x.com";
+    const parts = location.pathname.split("/").filter(Boolean);
+    const proposalId = decodeURIComponent(parts[parts.length - 1] || "");
+    let currentProposal = null;
+
+    async function json(path) {
+      const response = await fetch(path, { headers: { "Accept": "application/json" } });
+      if (!response.ok) {
+        throw new Error(`${path} returned HTTP ${response.status}`);
+      }
+      return response.json();
+    }
+
+    async function postJson(path, body) {
+      const response = await fetch(path, {
+        method: "POST",
+        headers: {
+          "Accept": "application/json",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(body)
+      });
+      if (!response.ok) {
+        const fallback = `${path} returned HTTP ${response.status}`;
+        try {
+          const value = await response.json();
+          throw new Error(value.error || fallback);
+        } catch (error) {
+          if (error instanceof SyntaxError) {
+            throw new Error(fallback);
+          }
+          throw error;
+        }
+      }
+      return response.json();
+    }
+
+    function text(value) {
+      return value === null || value === undefined || value === "" ? "-" : String(value);
+    }
+
+    function setText(id, value) {
+      document.getElementById(id).textContent = text(value);
+    }
+
+    function formatTime(unixMs) {
+      if (!unixMs) {
+        return "-";
+      }
+      return new Date(unixMs).toLocaleString();
+    }
+
+    function empty(message) {
+      const node = document.createElement("div");
+      node.className = "empty";
+      node.textContent = message;
+      return node;
+    }
+
+    function errorNode(error) {
+      const node = document.createElement("div");
+      node.className = "error";
+      node.textContent = error instanceof Error ? error.message : String(error);
+      return node;
+    }
+
+    function renderList(id, items, renderer, emptyMessage) {
+      const root = document.getElementById(id);
+      root.replaceChildren();
+      if (!Array.isArray(items) || items.length === 0) {
+        root.append(empty(emptyMessage));
+        return;
+      }
+      for (const item of items) {
+        root.append(renderer(item));
+      }
+    }
+
+    function line(label, value) {
+      const node = document.createElement("div");
+      const labelNode = document.createElement("span");
+      const valueNode = document.createElement("span");
+      node.className = "detail-row";
+      labelNode.className = "line-label";
+      labelNode.textContent = `${label}: `;
+      valueNode.className = "line";
+      valueNode.textContent = text(value);
+      node.append(labelNode, valueNode);
+      return node;
+    }
+
+    function item(title, body, pill) {
+      const container = document.createElement("div");
+      const heading = document.createElement("div");
+      const titleNode = document.createElement("div");
+      const pillNode = document.createElement("div");
+      const bodyNode = document.createElement("div");
+
+      container.className = "item";
+      heading.className = "item-title";
+      titleNode.textContent = text(title);
+      pillNode.className = "pill";
+      pillNode.textContent = text(pill);
+      bodyNode.className = "body";
+      if (body instanceof Node) {
+        bodyNode.append(body);
+      } else {
+        bodyNode.textContent = text(body);
+      }
+      heading.append(titleNode, pillNode);
+      container.append(heading, bodyNode);
+      return container;
+    }
+
+    function ruleLink(ruleId) {
+      const link = document.createElement("a");
+      link.href = `/dashboard/rules/${encodeURIComponent(ruleId)}`;
+      link.textContent = ruleId;
+      return link;
+    }
+
+    function examplesText(examples) {
+      const value = examples || {};
+      const positive = Array.isArray(value.positive) ? value.positive : [];
+      const negative = Array.isArray(value.negative) ? value.negative : [];
+      const parts = [];
+      if (positive.length) {
+        parts.push(`positive: ${positive.join(" | ")}`);
+      }
+      if (negative.length) {
+        parts.push(`negative: ${negative.join(" | ")}`);
+      }
+      return parts.join("; ");
+    }
+
+    function changeItem(change, index) {
+      const body = document.createElement("div");
+      const title = change.title || change.ruleId || `Change ${index + 1}`;
+      const ruleId = change.ruleId;
+
+      if (ruleId) {
+        const row = line("Rule ID", "");
+        const value = row.querySelector(".line");
+        value.replaceChildren(ruleLink(ruleId));
+        body.append(row);
+      }
+      body.append(
+        line("Status", change.status),
+        line("Priority", change.priority),
+        line("Instruction", change.instruction),
+        line("Rationale", change.rationale),
+        line("Evidence", Array.isArray(change.evidenceStorageKeys) ? change.evidenceStorageKeys.join(", ") : ""),
+        line("Examples", examplesText(change.examples))
+      );
+
+      return item(title, body, change.action || "change");
+    }
+
+    function changedRuleItem(rule) {
+      const body = document.createElement("div");
+      const row = line("Rule ID", "");
+      row.querySelector(".line").replaceChildren(ruleLink(rule.id));
+      body.append(
+        row,
+        line("Status", rule.status),
+        line("Priority", rule.priority),
+        line("Instruction", rule.instruction)
+      );
+      return item(rule.title || rule.id, body, rule.status);
+    }
+
+    function updateDecisionControls(proposal) {
+      const pending = proposal && proposal.status === "pending";
+      document.getElementById("applyProposal").disabled = !pending;
+      document.getElementById("dismissProposal").disabled = !pending;
+      document.getElementById("decisionStatus").textContent = pending
+        ? "Pending manual decision."
+        : `Proposal is ${proposal ? proposal.status : "unavailable"}.`;
+    }
+
+    function renderProposal(proposal) {
+      currentProposal = proposal;
+      const changes = Array.isArray(proposal.changes) ? proposal.changes : [];
+      document.title = `${proposal.id || proposalId} - WebLayer Proposal`;
+      setText("proposalTitle", proposal.id || proposalId);
+      setText(
+        "proposalMeta",
+        `${proposal.source || "-"}; created ${formatTime(proposal.createdAtUnixMs)}`
+      );
+      setText("proposalStatus", proposal.status);
+      setText("feedbackCount", proposal.feedbackCount);
+      setText("activeRuleCount", proposal.activeRuleCount);
+      setText("changeCount", changes.length);
+      renderList("changes", changes, changeItem, "No proposed changes.");
+      updateDecisionControls(proposal);
+    }
+
+    async function decide(action) {
+      if (!currentProposal || currentProposal.status !== "pending") {
+        return;
+      }
+
+      const applyButton = document.getElementById("applyProposal");
+      const dismissButton = document.getElementById("dismissProposal");
+      applyButton.disabled = true;
+      dismissButton.disabled = true;
+      setText("decisionStatus", action === "apply" ? "Applying proposal..." : "Rejecting proposal...");
+
+      try {
+        const response = await postJson(
+          `/v1/rule-proposals/${encodeURIComponent(proposalId)}/decision?site=${encodeURIComponent(SITE)}`,
+          { action, source: "dashboard" }
+        );
+        renderProposal(response.proposal || {});
+        renderList(
+          "changedRules",
+          response.changedRules,
+          changedRuleItem,
+          action === "apply" ? "No rules changed." : "Proposal rejected without changing rules."
+        );
+        setText("decisionStatus", action === "apply" ? "Proposal accepted." : "Proposal rejected.");
+      } catch (error) {
+        document.getElementById("changedRules").replaceChildren(errorNode(error));
+        updateDecisionControls(currentProposal);
+      }
+    }
+
+    async function load() {
+      if (!proposalId) {
+        throw new Error("Missing proposal id in page URL");
+      }
+
+      try {
+        const detail = await json(
+          `/v1/rule-proposals/${encodeURIComponent(proposalId)}?site=${encodeURIComponent(SITE)}`
+        );
+        renderProposal(detail.proposal || {});
+        renderList("changedRules", [], changedRuleItem, "No decision made from this page.");
+      } catch (error) {
+        document.getElementById("changes").replaceChildren(errorNode(error));
+        document.getElementById("changedRules").replaceChildren(errorNode(error));
+        setText("proposalMeta", "Load failed");
+      }
+    }
+
+    document.getElementById("applyProposal").addEventListener("click", () => {
+      void decide("apply");
+    });
+    document.getElementById("dismissProposal").addEventListener("click", () => {
+      void decide("dismiss");
+    });
+
+    void load();
+  </script>
+</body>
+</html>
+"##;
+
 const POSTS_DASHBOARD_HTML: &str = r##"<!doctype html>
 <html lang="en">
 <head>
@@ -1278,6 +1819,7 @@ mod tests {
         assert!(html.contains("/v1/rules?site="));
         assert!(html.contains("/dashboard/posts"));
         assert!(html.contains("/dashboard/rules/"));
+        assert!(html.contains("/dashboard/proposals/"));
         assert!(html.contains("/v1/feedback?site="));
         assert!(html.contains("/v1/rule-proposals?site="));
         assert!(html.contains("Review Rule Set"));
@@ -1303,5 +1845,16 @@ mod tests {
         assert!(html.contains("/v1/content?site="));
         assert!(html.contains("Stored Posts"));
         assert!(html.contains("IntersectionObserver"));
+    }
+
+    #[tokio::test]
+    async fn proposal_dashboard_page_links_proposal_surfaces() {
+        let Html(html) = proposal_dashboard().await;
+
+        assert!(html.contains("/v1/rule-proposals/${encodeURIComponent(proposalId)}?site="));
+        assert!(html.contains("/decision?site="));
+        assert!(html.contains("Accept Proposal"));
+        assert!(html.contains("Reject Proposal"));
+        assert!(html.contains("Changed Rules"));
     }
 }

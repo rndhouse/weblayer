@@ -6,9 +6,10 @@ use super::{
 use crate::storage::{
     ContentRule, RuleAuditEvent, RuleCreateInput, RuleDetail, RuleExamples, RulePage, RuleQuery,
     RuleSetProposal, RuleSetProposalAction, RuleSetProposalChange, RuleSetProposalCreateInput,
-    RuleSetProposalPage, RuleSetProposalQuery, RuleStatusInput, RuleSuggestion, RuleSuggestionPage,
-    RuleSuggestionQuery, RuleUpdateInput, RuleValidationMatch, RuleValidationPage,
-    RuleValidationQuery, StoredContentItem, XDislikeQuery, XDislikedPost,
+    RuleSetProposalDecision, RuleSetProposalDecisionResult, RuleSetProposalPage,
+    RuleSetProposalQuery, RuleStatusInput, RuleSuggestion, RuleSuggestionPage, RuleSuggestionQuery,
+    RuleUpdateInput, RuleValidationMatch, RuleValidationPage, RuleValidationQuery,
+    StoredContentItem, XDislikeQuery, XDislikedPost,
 };
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use std::collections::BTreeMap;
@@ -463,6 +464,90 @@ impl Store {
         load_rule_set_proposal(&self.connection, &id)
     }
 
+    pub(in crate::storage) fn decide_rule_set_proposal(
+        &mut self,
+        id: &str,
+        decision: RuleSetProposalDecision,
+        source: &str,
+    ) -> Result<Option<RuleSetProposalDecisionResult>> {
+        let Some(id) = clean_rule_id_for_lookup(id) else {
+            return Ok(None);
+        };
+        let source = required_clean_text(source, "source")?;
+        let Some(proposal) = load_rule_set_proposal(&self.connection, &id)? else {
+            return Ok(None);
+        };
+
+        ensure_pending_rule_set_proposal(&proposal)?;
+
+        match decision {
+            RuleSetProposalDecision::Apply => {
+                self.validate_rule_set_proposal_application(&proposal)?;
+                let mut changed_rules = Vec::new();
+
+                for change in proposal.changes.clone() {
+                    match change.action {
+                        RuleSetProposalAction::CreateRule => {
+                            let rule = self.create_rule(RuleCreateInput {
+                                id: change.rule_id,
+                                status: change.status,
+                                priority: change.priority,
+                                title: change
+                                    .title
+                                    .expect("createRule proposals should have a cleaned title"),
+                                instruction: change.instruction.expect(
+                                    "createRule proposals should have a cleaned instruction",
+                                ),
+                                created_source: source.clone(),
+                                examples: change.examples,
+                            })?;
+                            changed_rules.push(rule);
+                        }
+                        RuleSetProposalAction::UpdateRule => {
+                            let rule = self
+                                .update_rule(RuleUpdateInput {
+                                    id: proposal_change_rule_id(&change)?.to_string(),
+                                    status: change.status,
+                                    priority: change.priority,
+                                    title: change.title,
+                                    instruction: change.instruction,
+                                    source: source.clone(),
+                                    positive_examples: non_empty_examples(change.examples.positive),
+                                    negative_examples: non_empty_examples(change.examples.negative),
+                                })?
+                                .expect("validated updateRule target should still exist");
+                            changed_rules.push(rule);
+                        }
+                        RuleSetProposalAction::DisableRule => {
+                            let rule = self
+                                .update_rule_status(RuleStatusInput {
+                                    id: proposal_change_rule_id(&change)?.to_string(),
+                                    status: change.status.unwrap_or_else(|| "disabled".into()),
+                                    source: source.clone(),
+                                })?
+                                .expect("validated disableRule target should still exist");
+                            changed_rules.push(rule);
+                        }
+                        RuleSetProposalAction::NoChange => {}
+                    }
+                }
+
+                let proposal = self.set_rule_set_proposal_status(&proposal, "applied")?;
+                Ok(Some(RuleSetProposalDecisionResult {
+                    proposal,
+                    changed_rules,
+                }))
+            }
+            RuleSetProposalDecision::Dismiss => {
+                let proposal = self.set_rule_set_proposal_status(&proposal, "dismissed")?;
+                Ok(Some(RuleSetProposalDecisionResult {
+                    proposal,
+                    changed_rules: Vec::new(),
+                }))
+            }
+        }
+    }
+
     fn rule(&self, id: &str) -> Result<Option<ContentRule>> {
         load_rule(&self.connection, id)
     }
@@ -505,6 +590,59 @@ impl Store {
             source,
             created_at_unix_ms,
         )
+    }
+
+    fn validate_rule_set_proposal_application(&self, proposal: &RuleSetProposal) -> Result<()> {
+        for change in &proposal.changes {
+            match change.action {
+                RuleSetProposalAction::CreateRule => {
+                    if let Some(rule_id) = change.rule_id.as_deref() {
+                        if self.rule(rule_id)?.is_some() {
+                            return Err(StorageError::InvalidInput(format!(
+                                "rule id already exists: {rule_id}"
+                            )));
+                        }
+                    }
+                }
+                RuleSetProposalAction::UpdateRule | RuleSetProposalAction::DisableRule => {
+                    let rule_id = proposal_change_rule_id(change)?;
+                    if self.rule(rule_id)?.is_none() {
+                        return Err(StorageError::InvalidInput(format!(
+                            "rule not found for proposal change: {rule_id}"
+                        )));
+                    }
+                }
+                RuleSetProposalAction::NoChange => {}
+            }
+        }
+
+        Ok(())
+    }
+
+    fn set_rule_set_proposal_status(
+        &self,
+        proposal: &RuleSetProposal,
+        status: &str,
+    ) -> Result<RuleSetProposal> {
+        let status = clean_rule_set_proposal_status(status)?;
+        let mut proposal = proposal.clone();
+        proposal.status = status;
+        let proposal_json = serde_json::to_string(&proposal)?;
+
+        self.connection.execute(
+            "
+            UPDATE rule_set_proposals
+            SET status = ?2, proposal_json = ?3
+            WHERE id = ?1
+            ",
+            params![
+                proposal.id.as_str(),
+                proposal.status.as_str(),
+                proposal_json.as_str()
+            ],
+        )?;
+
+        Ok(proposal)
     }
 }
 
@@ -675,6 +813,27 @@ fn load_rule_set_proposal(connection: &Connection, id: &str) -> Result<Option<Ru
             rule_set_proposal_from_row,
         )
         .optional()?)
+}
+
+fn ensure_pending_rule_set_proposal(proposal: &RuleSetProposal) -> Result<()> {
+    if proposal.status == "pending" {
+        return Ok(());
+    }
+
+    Err(StorageError::InvalidInput(format!(
+        "rule-set proposal is already {}",
+        proposal.status
+    )))
+}
+
+fn proposal_change_rule_id(change: &RuleSetProposalChange) -> Result<&str> {
+    change.rule_id.as_deref().ok_or_else(|| {
+        StorageError::InvalidInput(format!("{:?} proposals require ruleId", change.action))
+    })
+}
+
+fn non_empty_examples(examples: Vec<String>) -> Option<Vec<String>> {
+    (!examples.is_empty()).then_some(examples)
 }
 
 fn required_clean_text(value: &str, field: &str) -> Result<String> {

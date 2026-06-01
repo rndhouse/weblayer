@@ -642,6 +642,25 @@ pub struct RuleSetProposalCreateInput {
     pub changes: Vec<RuleSetProposalChange>,
 }
 
+/// Decision to make for one stored rule-set proposal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuleSetProposalDecision {
+    /// Apply the proposal's changes to the stored rule set.
+    Apply,
+    /// Dismiss the proposal without changing rules.
+    Dismiss,
+}
+
+/// Result of deciding one stored rule-set proposal.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleSetProposalDecisionResult {
+    /// Proposal after the decision was recorded.
+    pub proposal: RuleSetProposal,
+    /// Rules created or changed while applying the proposal.
+    pub changed_rules: Vec<ContentRule>,
+}
+
 /// One proposed rule-set change.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -903,6 +922,20 @@ impl ContentStore {
             .lock()
             .expect("X storage mutex should not be poisoned");
         db.rule_set_proposal(id)
+    }
+
+    /// Applies or dismisses one stored X/Twitter rule-set proposal.
+    pub fn x_decide_rule_set_proposal(
+        &self,
+        id: &str,
+        decision: RuleSetProposalDecision,
+        source: &str,
+    ) -> Result<Option<RuleSetProposalDecisionResult>> {
+        let mut db = self
+            .x_com
+            .lock()
+            .expect("X storage mutex should not be poisoned");
+        db.decide_rule_set_proposal(id, decision, source)
     }
 
     /// Returns aggregate counts for stored X/Twitter content.

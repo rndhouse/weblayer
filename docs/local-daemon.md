@@ -56,6 +56,7 @@ WEBLAYER_X_DEBUG_STATS=1 weblayer daemon
 - `GET /health`
 - `GET /dashboard`
 - `GET /dashboard/posts`
+- `GET /dashboard/proposals/{id}`
 - `GET /dashboard/rules/{id}`
 - `GET /v1/events`
 - `POST /v1/dom/analyze`
@@ -65,6 +66,10 @@ WEBLAYER_X_DEBUG_STATS=1 weblayer daemon
 - `POST /v1/content/annotations?site=x.com`
 - `GET /v1/content/stats?site=x.com`
 - `GET /v1/feedback?site=x.com`
+- `GET /v1/rule-proposals?site=x.com`
+- `POST /v1/rule-proposals?site=x.com`
+- `GET /v1/rule-proposals/{id}?site=x.com`
+- `POST /v1/rule-proposals/{id}/decision?site=x.com`
 - `GET /v1/rule-suggestions?site=x.com`
 - `GET /v1/rules?site=x.com`
 - `POST /v1/rules?site=x.com`

@@ -40,6 +40,10 @@ pub fn router() -> Result<Router, StorageError> {
         .route("/health", get(health))
         .route("/dashboard", get(dashboard::dashboard))
         .route("/dashboard/posts", get(dashboard::posts_dashboard))
+        .route(
+            "/dashboard/proposals/{proposal_id}",
+            get(dashboard::proposal_dashboard),
+        )
         .route("/dashboard/rules/{rule_id}", get(dashboard::rule_dashboard))
         .route("/v1/events", get(events::events_ws))
         .route("/v1/dom/analyze", post(dom::analyze_dom))
@@ -59,6 +63,10 @@ pub fn router() -> Result<Router, StorageError> {
         .route(
             "/v1/rule-proposals/{proposal_id}",
             get(rules::rule_set_proposal),
+        )
+        .route(
+            "/v1/rule-proposals/{proposal_id}/decision",
+            post(rules::decide_rule_set_proposal),
         )
         .route("/v1/rule-suggestions", get(rules::rule_suggestions))
         .route("/v1/rules", get(rules::rules).post(rules::create_rule))

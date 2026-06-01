@@ -11,8 +11,8 @@ use crate::{
     storage::{
         ContentAnnotationInput, ContentAnnotationQuery, ContentQuery, RuleCatchQuery,
         RuleCreateInput, RuleExamples, RuleQuery, RuleSetProposalAction, RuleSetProposalChange,
-        RuleSetProposalCreateInput, RuleSetProposalQuery, RuleStatusInput, RuleSuggestionQuery,
-        RuleUpdateInput, RuleValidationQuery, XDislikeQuery,
+        RuleSetProposalCreateInput, RuleSetProposalDecision, RuleSetProposalQuery, RuleStatusInput,
+        RuleSuggestionQuery, RuleUpdateInput, RuleValidationQuery, XDislikeQuery,
     },
 };
 use serde_json::{json, Value};
@@ -1256,6 +1256,101 @@ fn stores_rule_set_proposals_for_review() {
     assert_eq!(loaded.changes[0].evidence_storage_keys, vec!["x:id:123"]);
     assert_eq!(page.total_matching, 1);
     assert_eq!(page.items[0].id, proposal.id);
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap().parent().unwrap());
+}
+
+#[test]
+fn applies_rule_set_proposals_to_rules() {
+    let db_path = temp_db_path("applies-rule-proposal");
+    let mut store = Store::open(&db_path).expect("store should open");
+
+    let proposal = store
+        .create_rule_set_proposal(RuleSetProposalCreateInput {
+            source: "agent:test".into(),
+            feedback_count: 2,
+            active_rule_count: 1,
+            changes: vec![RuleSetProposalChange {
+                action: RuleSetProposalAction::CreateRule,
+                rule_id: Some("x-feedback-low-info".into()),
+                status: Some("draft".into()),
+                priority: Some(90),
+                title: Some("Low information".into()),
+                instruction: Some("Hide very low-information posts.".into()),
+                rationale: "Feedback points at low-information content.".into(),
+                evidence_storage_keys: vec!["x:id:123".into()],
+                examples: RuleExamples {
+                    positive: vec!["nothing to see here".into()],
+                    negative: vec!["detailed technical note".into()],
+                },
+            }],
+        })
+        .expect("proposal should store");
+
+    let result = store
+        .decide_rule_set_proposal(&proposal.id, RuleSetProposalDecision::Apply, "dashboard")
+        .expect("proposal should apply")
+        .expect("proposal should exist");
+    let loaded = store
+        .rule_set_proposal(&proposal.id)
+        .expect("proposal should load")
+        .expect("proposal should exist");
+    let rule = store
+        .rule_detail("x-feedback-low-info")
+        .expect("rule detail should load")
+        .expect("rule should exist")
+        .rule;
+
+    assert_eq!(result.proposal.status, "applied");
+    assert_eq!(result.changed_rules.len(), 1);
+    assert_eq!(result.changed_rules[0].id, "x-feedback-low-info");
+    assert_eq!(loaded.status, "applied");
+    assert_eq!(rule.status, "draft");
+    assert_eq!(rule.priority, 90);
+    assert_eq!(rule.created_source, "dashboard");
+    assert_eq!(rule.examples.positive, vec!["nothing to see here"]);
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap().parent().unwrap());
+}
+
+#[test]
+fn dismisses_rule_set_proposals_without_rule_changes() {
+    let db_path = temp_db_path("dismisses-rule-proposal");
+    let mut store = Store::open(&db_path).expect("store should open");
+
+    let proposal = store
+        .create_rule_set_proposal(RuleSetProposalCreateInput {
+            source: "agent:test".into(),
+            feedback_count: 0,
+            active_rule_count: 1,
+            changes: Vec::new(),
+        })
+        .expect("proposal should store");
+
+    let result = store
+        .decide_rule_set_proposal(&proposal.id, RuleSetProposalDecision::Dismiss, "dashboard")
+        .expect("proposal should dismiss")
+        .expect("proposal should exist");
+    let pending = store
+        .rule_set_proposals(RuleSetProposalQuery {
+            status: Some("pending".into()),
+            limit: 10,
+            offset: 0,
+        })
+        .expect("pending proposals should list");
+    let dismissed = store
+        .rule_set_proposals(RuleSetProposalQuery {
+            status: Some("dismissed".into()),
+            limit: 10,
+            offset: 0,
+        })
+        .expect("dismissed proposals should list");
+
+    assert_eq!(result.proposal.status, "dismissed");
+    assert!(result.changed_rules.is_empty());
+    assert_eq!(pending.total_matching, 0);
+    assert_eq!(dismissed.total_matching, 1);
+    assert_eq!(dismissed.items[0].id, proposal.id);
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap().parent().unwrap());
 }

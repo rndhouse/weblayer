@@ -180,6 +180,7 @@ RUST_LOG=debug
 - `GET /health`
 - `GET /dashboard`
 - `GET /dashboard/posts`
+- `GET /dashboard/proposals/{id}`
 - `GET /dashboard/rules/{id}`
 - `GET /v1/events`
 - `POST /v1/dom/analyze`
@@ -192,6 +193,7 @@ RUST_LOG=debug
 - `GET /v1/rule-proposals?site=x.com`
 - `POST /v1/rule-proposals?site=x.com`
 - `GET /v1/rule-proposals/{id}?site=x.com`
+- `POST /v1/rule-proposals/{id}/decision?site=x.com`
 - `GET /v1/rule-suggestions?site=x.com`
 - `GET /v1/rules?site=x.com`
 - `POST /v1/rules?site=x.com`
@@ -278,15 +280,16 @@ Content-Type: application/json
 ```json
 {
   "minFeedback": 2,
-  "feedbackLimit": 100
+  "feedbackLimit": 10
 }
 ```
 
 The response stores and returns a proposal with actions such as `createRule`,
 `updateRule`, `disableRule`, or `noChange`. Proposals are not applied
-automatically; review them through `GET /v1/rule-proposals` or
-`GET /v1/rule-proposals/{id}` before using the regular rule management commands
-to make changes.
+automatically; review them through `/dashboard/proposals/{id}` or
+`GET /v1/rule-proposals/{id}`. To manually accept or reject one, post
+`{"action":"apply"}` or `{"action":"dismiss"}` to
+`/v1/rule-proposals/{id}/decision?site=x.com`.
 
 Content annotation request shape:
 
