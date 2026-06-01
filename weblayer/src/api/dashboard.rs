@@ -738,13 +738,12 @@ const RULE_DASHBOARD_HTML: &str = r##"<!doctype html>
           /^(?:·\s*)?(?:(?:now|\d+[smhd])|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2})\s*/i,
           ""
         ).trim();
-        value = value.replace(/([.!?])(?:\d+(?:\.\d+)?[KMB]?){2,}$/i, "$1").trim();
-        value = value.replace(/([.!?A-Za-z])\d{3,}(?:[KMB])?$/i, "$1").trim();
       }
 
       value = value
         .replace(/\s*·\s*/g, " · ")
-        .replace(/([a-z])(\d{2,}(?:[KMB])?)$/i, "$1 $2")
+        .replace(/\s+(?:\d+(?:\.\d+)?[KMB]?){2,}$/i, "")
+        .replace(/([^\d\s])(?:\d+(?:\.\d+)?[KMB]?){2,}$/i, "$1")
         .replace(/\s+/g, " ")
         .trim();
 
