@@ -65,7 +65,8 @@ Content-Type: application/json
 ```
 
 Supported DOM command actions are `keep`, `hide`, `dim`, `insertLabel`,
-`insertFeedbackControl`, and `replaceText`.
+`insertFeedbackControl`, `replaceText`, and `showDebugStats`. The daemon emits
+`showDebugStats` only when X debug stats are enabled.
 
 The extension decides only which site content surfaces may be captured. It does
 not make filtering decisions. The daemon interprets captured content and

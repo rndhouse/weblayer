@@ -168,6 +168,7 @@ WEBLAYER_CODEX_RULE_PROPOSAL_TIMEOUT_MS=120000
 WEBLAYER_CODEX_CWD=/path/to/project
 WEBLAYER_DATA_DIR=/home/user/.local/share/weblayer
 WEBLAYER_LOG_CAPTURED_CONTENT=0
+WEBLAYER_X_DEBUG_STATS=0
 WEBLAYER_X_RESET_DB=0
 WEBLAYER_X_SUMMARY_CACHE_MAX_ENTRIES=10000
 WEBLAYER_X_SUMMARY_CACHE_TTL_SECS=86400
@@ -361,6 +362,11 @@ DOM analysis response shape:
 daemon-side lookup key for active rule snapshots and item-specific decision
 metadata.
 
+When `WEBLAYER_X_DEBUG_STATS=1`, X/Twitter command responses also include a
+`showDebugStats` command. The command carries a `debugStats` payload with
+daemon-side storage, feedback, rule curation, and rule-catch counters for a
+debug overlay.
+
 WebSocket request shape:
 
 ```json
@@ -388,10 +394,10 @@ WebSocket command event shape:
 ```
 
 Supported command actions are `keep`, `hide`, `dim`, `insertLabel`,
-`insertFeedbackControl`, and `replaceText`. Site-specific DOM interpretation
-lives under `src/sites/`, and site-specific SQLite storage lives under
-`src/storage/`; the extension stays generic and only captures DOM regions and
-executes commands.
+`insertFeedbackControl`, `replaceText`, and `showDebugStats`. Site-specific DOM
+interpretation lives under `src/sites/`, and site-specific SQLite storage lives
+under `src/storage/`; the extension stays generic and only captures DOM regions
+and executes commands.
 
 ## License
 

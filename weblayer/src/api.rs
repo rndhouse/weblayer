@@ -23,6 +23,7 @@ use tokio::sync::Mutex;
 use tower_http::cors::{Any, CorsLayer};
 
 const LOG_CAPTURED_CONTENT_ENV: &str = "WEBLAYER_LOG_CAPTURED_CONTENT";
+const X_DEBUG_STATS_ENV: &str = "WEBLAYER_X_DEBUG_STATS";
 
 /// Builds the daemon HTTP router.
 pub fn router() -> Result<Router, StorageError> {
@@ -30,6 +31,7 @@ pub fn router() -> Result<Router, StorageError> {
         ai_analyzer: AiAnalyzer::from_env(),
         content_store: ContentStore::from_env()?,
         log_captured_content: captured_content_logging_enabled(),
+        x_debug_stats: x_debug_stats_enabled(),
         rule_curation: Arc::new(Mutex::new(())),
     };
 
@@ -74,6 +76,11 @@ pub fn captured_content_logging_enabled() -> bool {
     env_flag_default(LOG_CAPTURED_CONTENT_ENV, false)
 }
 
+/// Returns whether X/Twitter debug stats should be rendered in browser pages.
+pub fn x_debug_stats_enabled() -> bool {
+    env_flag_default(X_DEBUG_STATS_ENV, false)
+}
+
 fn cors_layer() -> CorsLayer {
     CorsLayer::new()
         .allow_origin(Any)
@@ -100,6 +107,7 @@ struct AppState {
     ai_analyzer: AiAnalyzer,
     content_store: ContentStore,
     log_captured_content: bool,
+    x_debug_stats: bool,
     rule_curation: Arc<Mutex<()>>,
 }
 

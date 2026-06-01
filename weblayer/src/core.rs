@@ -320,6 +320,9 @@ pub struct DomCommand {
     /// Active rule IDs that contributed to this command.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub matched_rule_ids: Vec<String>,
+    /// Optional debug-only stats payload for a page-level overlay.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_stats: Option<DebugStatsPanel>,
 }
 
 impl DomCommand {
@@ -342,6 +345,7 @@ impl DomCommand {
             confidence: decision.confidence,
             feedback_context_id: None,
             matched_rule_ids: decision.matched_rule_ids,
+            debug_stats: None,
         }
     }
 
@@ -356,6 +360,7 @@ impl DomCommand {
             confidence: None,
             feedback_context_id: None,
             matched_rule_ids: Vec::new(),
+            debug_stats: None,
         }
     }
 
@@ -364,6 +369,25 @@ impl DomCommand {
         let mut command = Self::feedback_control(target);
         command.feedback_context_id = Some(context_id);
         command
+    }
+
+    /// Builds a page-level debug stats command.
+    pub fn debug_stats(stats: DebugStatsPanel) -> Self {
+        Self {
+            action: DomCommandAction::ShowDebugStats,
+            target: DomCommandTarget {
+                client_id: "weblayer:x-debug-stats".into(),
+                selector: None,
+                must_match_snapshot_hash: None,
+            },
+            label: Some(stats.title.clone()),
+            text: None,
+            reason: Some("Debug stats are enabled by the daemon.".into()),
+            confidence: None,
+            feedback_context_id: None,
+            matched_rule_ids: Vec::new(),
+            debug_stats: Some(stats),
+        }
     }
 }
 
@@ -383,6 +407,8 @@ pub enum DomCommandAction {
     InsertFeedbackControl,
     /// Replace the region text.
     ReplaceText,
+    /// Show or update a page-level debug stats panel.
+    ShowDebugStats,
 }
 
 /// Targeting and consistency checks for a DOM command.
@@ -395,4 +421,41 @@ pub struct DomCommandTarget {
     pub selector: Option<String>,
     /// Snapshot hash that must still match before applying the command.
     pub must_match_snapshot_hash: Option<String>,
+}
+
+/// Debug-only stats payload rendered by the browser extension.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugStatsPanel {
+    /// Site scope that produced these stats.
+    pub site: String,
+    /// Short title for the stats panel.
+    pub title: String,
+    /// Daemon-side generation timestamp.
+    pub generated_at_unix_ms: u128,
+    /// Grouped metrics to display.
+    pub sections: Vec<DebugStatsSection>,
+}
+
+/// A group of related debug stats.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugStatsSection {
+    /// Section title.
+    pub title: String,
+    /// Metrics in this section.
+    pub metrics: Vec<DebugStatsMetric>,
+}
+
+/// One debug stats row.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugStatsMetric {
+    /// Human-readable metric label.
+    pub label: String,
+    /// Human-readable metric value.
+    pub value: String,
+    /// Optional supporting detail.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
 }

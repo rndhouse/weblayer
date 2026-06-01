@@ -324,7 +324,8 @@ function normalizeCommand(command) {
     "dim",
     "insertLabel",
     "insertFeedbackControl",
-    "replaceText"
+    "replaceText",
+    "showDebugStats"
   ]);
   const target = command.target && typeof command.target === "object" ? command.target : {};
   const normalizedAction = allowedActions.has(action) ? action : "keep";
@@ -345,7 +346,48 @@ function normalizeCommand(command) {
       : stringOrNull(command.feedbackContextId),
     matchedRuleIds: Array.isArray(command.matchedRuleIds)
       ? command.matchedRuleIds.map(stringOrEmpty).filter(Boolean)
+      : [],
+    debugStats: normalizedAction === "showDebugStats"
+      ? normalizeDebugStats(command.debugStats)
+      : null
+  };
+}
+
+function normalizeDebugStats(stats) {
+  if (!stats || typeof stats !== "object") {
+    return null;
+  }
+
+  return {
+    site: stringOrEmpty(stats.site),
+    title: stringOrEmpty(stats.title) || "WebLayer stats",
+    generatedAtUnixMs: Number.isFinite(stats.generatedAtUnixMs)
+      ? stats.generatedAtUnixMs
+      : null,
+    sections: Array.isArray(stats.sections)
+      ? stats.sections.map(normalizeDebugStatsSection).filter((section) => (
+        section.title || section.metrics.length > 0
+      ))
       : []
+  };
+}
+
+function normalizeDebugStatsSection(section) {
+  return {
+    title: stringOrEmpty(section && section.title),
+    metrics: Array.isArray(section && section.metrics)
+      ? section.metrics.map(normalizeDebugStatsMetric).filter((metric) => (
+        metric.label || metric.value || metric.detail
+      ))
+      : []
+  };
+}
+
+function normalizeDebugStatsMetric(metric) {
+  return {
+    label: stringOrEmpty(metric && metric.label),
+    value: stringOrEmpty(metric && metric.value),
+    detail: stringOrNull(metric && metric.detail)
   };
 }
 

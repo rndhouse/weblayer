@@ -134,7 +134,9 @@ WebSocket command event shape:
 ```
 
 Supported actions are `keep`, `hide`, `dim`, `insertLabel`,
-`insertFeedbackControl`, and `replaceText`. The extension decides only which
+`insertFeedbackControl`, `replaceText`, and `showDebugStats`. `showDebugStats`
+is emitted only when the daemon enables X debug stats and carries a structured
+`debugStats` payload for a small page overlay. The extension decides only which
 site content surfaces may be captured. It does not make filtering decisions;
 the daemon interprets captured content and decides what commands to return.
 

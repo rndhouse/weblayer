@@ -84,9 +84,10 @@ async fn handle_client_event(
                 dom::log_dom_batch(&batch);
             }
 
-            if let Some(commands) =
+            if let Some(mut commands) =
                 sites::cached_dom_commands(&batch, &state.ai_analyzer, &state.content_store)
             {
+                dom::append_debug_stats_command(&state, &batch.page.url, &mut commands);
                 rule_curation::schedule_x_rule_curation(state);
                 let _ = event_sender.send(ServerEvent::commands(
                     request_id,
@@ -96,16 +97,20 @@ async fn handle_client_event(
                 return;
             }
 
+            let mut pending_commands =
+                sites::pending_dom_commands(&batch, &state.ai_analyzer, &state.content_store);
+            dom::append_debug_stats_command(&state, &batch.page.url, &mut pending_commands);
             let _ = event_sender.send(ServerEvent::commands(
                 request_id.clone(),
                 AnalysisPhase::Pending,
-                sites::pending_dom_commands(&batch, &state.ai_analyzer, &state.content_store),
+                pending_commands,
             ));
 
             let final_sender = event_sender.clone();
             tokio::spawn(async move {
-                let commands =
+                let mut commands =
                     sites::analyze_dom(&batch, &state.ai_analyzer, &state.content_store).await;
+                dom::append_debug_stats_command(&state, &batch.page.url, &mut commands);
                 rule_curation::schedule_x_rule_curation(state);
                 let _ = final_sender.send(ServerEvent::commands(
                     request_id,

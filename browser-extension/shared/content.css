@@ -195,3 +195,99 @@
 .weblayer-replaced {
   color: #536471 !important;
 }
+
+.weblayer-debug-stats-panel {
+  position: fixed;
+  top: 72px;
+  right: 16px;
+  z-index: 2147483647;
+  box-sizing: border-box;
+  width: min(300px, calc(100vw - 32px));
+  max-height: calc(100vh - 96px);
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.42);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.94);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.32);
+  color: rgb(226, 232, 240);
+  font: 12px/1.35 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.weblayer-debug-stats-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.weblayer-debug-stats-title {
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.weblayer-debug-stats-meta {
+  flex: 0 0 auto;
+  color: rgb(125, 211, 252);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.weblayer-debug-stats-section + .weblayer-debug-stats-section {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(148, 163, 184, 0.28);
+}
+
+.weblayer-debug-stats-section-title {
+  margin-bottom: 6px;
+  color: rgb(167, 243, 208);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.weblayer-debug-stats-metrics {
+  display: grid;
+  gap: 6px;
+}
+
+.weblayer-debug-stats-metric {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 10px;
+  align-items: baseline;
+}
+
+.weblayer-debug-stats-label {
+  min-width: 0;
+  color: rgb(203, 213, 225);
+  overflow-wrap: anywhere;
+}
+
+.weblayer-debug-stats-value {
+  color: rgb(248, 250, 252);
+  font-weight: 700;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.weblayer-debug-stats-detail {
+  grid-column: 1 / -1;
+  color: rgb(148, 163, 184);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 720px) {
+  .weblayer-debug-stats-panel {
+    top: auto;
+    right: 8px;
+    bottom: 8px;
+    width: min(320px, calc(100vw - 16px));
+    max-height: min(48vh, 360px);
+  }
+}

@@ -45,6 +45,12 @@ Incoming posts are not logged by default. To enable captured-content log events:
 WEBLAYER_LOG_CAPTURED_CONTENT=1 weblayer daemon
 ```
 
+Enable an X.com page overlay with daemon-side debug counters:
+
+```sh
+WEBLAYER_X_DEBUG_STATS=1 weblayer daemon
+```
+
 ## Endpoints
 
 - `GET /health`

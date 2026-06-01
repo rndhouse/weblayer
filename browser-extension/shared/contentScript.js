@@ -5,6 +5,7 @@ const MAX_HTML_CHARS = 60000;
 const MAX_LINKS = 80;
 const MAX_ATTRIBUTES = 40;
 const FEEDBACK_REASON_SAVE_DEBOUNCE_MS = 550;
+const DEBUG_STATS_PANEL_ID = "weblayer-debug-stats-panel";
 const FEEDBACK_REASON_PRESETS = [
   "Low information",
   "Rage bait",
@@ -351,6 +352,11 @@ function sendMessage(message) {
 
 function applyCommands(commands) {
   for (const command of commands) {
+    if (command.action === "showDebugStats") {
+      renderDebugStatsPanel(command.debugStats);
+      continue;
+    }
+
     const element = resolveTarget(command.target);
     if (!element || !targetStillMatches(element, command.target)) {
       continue;
@@ -394,6 +400,111 @@ function applyCommands(commands) {
       insertBadge(element, command);
     }
   }
+}
+
+function renderDebugStatsPanel(stats) {
+  if (!stats || !Array.isArray(stats.sections)) {
+    removeDebugStatsPanel();
+    return;
+  }
+
+  let panel = document.getElementById(DEBUG_STATS_PANEL_ID);
+  if (!panel) {
+    panel = document.createElement("aside");
+    panel.id = DEBUG_STATS_PANEL_ID;
+    panel.className = "weblayer-debug-stats-panel";
+    panel.dataset.weblayerUi = "true";
+    panel.setAttribute("aria-live", "polite");
+    document.documentElement.append(panel);
+  }
+
+  panel.replaceChildren(createDebugStatsHeader(stats));
+  for (const section of stats.sections) {
+    panel.append(createDebugStatsSection(section));
+  }
+}
+
+function removeDebugStatsPanel() {
+  const panel = document.getElementById(DEBUG_STATS_PANEL_ID);
+  if (panel) {
+    panel.remove();
+  }
+}
+
+function createDebugStatsHeader(stats) {
+  const header = document.createElement("div");
+  const title = document.createElement("div");
+  const meta = document.createElement("div");
+
+  header.className = "weblayer-debug-stats-header";
+  header.dataset.weblayerUi = "true";
+  title.className = "weblayer-debug-stats-title";
+  title.dataset.weblayerUi = "true";
+  title.textContent = stats.title || "WebLayer stats";
+  meta.className = "weblayer-debug-stats-meta";
+  meta.dataset.weblayerUi = "true";
+  meta.textContent = debugStatsMeta(stats);
+
+  header.append(title, meta);
+  return header;
+}
+
+function debugStatsMeta(stats) {
+  const parts = [];
+  if (stats.site) {
+    parts.push(stats.site);
+  }
+  if (Number.isFinite(stats.generatedAtUnixMs)) {
+    parts.push(shortTime(new Date(stats.generatedAtUnixMs)));
+  }
+  return parts.join(" | ");
+}
+
+function createDebugStatsSection(section) {
+  const container = document.createElement("section");
+  const title = document.createElement("div");
+  const metrics = document.createElement("div");
+
+  container.className = "weblayer-debug-stats-section";
+  container.dataset.weblayerUi = "true";
+  title.className = "weblayer-debug-stats-section-title";
+  title.dataset.weblayerUi = "true";
+  title.textContent = section.title || "";
+  metrics.className = "weblayer-debug-stats-metrics";
+  metrics.dataset.weblayerUi = "true";
+
+  for (const metric of Array.isArray(section.metrics) ? section.metrics : []) {
+    metrics.append(createDebugStatsMetric(metric));
+  }
+
+  container.append(title, metrics);
+  return container;
+}
+
+function createDebugStatsMetric(metric) {
+  const row = document.createElement("div");
+  const label = document.createElement("div");
+  const value = document.createElement("div");
+
+  row.className = "weblayer-debug-stats-metric";
+  row.dataset.weblayerUi = "true";
+  label.className = "weblayer-debug-stats-label";
+  label.dataset.weblayerUi = "true";
+  label.textContent = metric.label || "";
+  value.className = "weblayer-debug-stats-value";
+  value.dataset.weblayerUi = "true";
+  value.textContent = metric.value || "";
+
+  row.append(label, value);
+  if (metric.detail) {
+    const detail = document.createElement("div");
+    detail.className = "weblayer-debug-stats-detail";
+    detail.dataset.weblayerUi = "true";
+    detail.textContent = metric.detail;
+    row.append(detail);
+  }
+
+  return row;
 }
 
 function handleWebLayerClick(event) {
