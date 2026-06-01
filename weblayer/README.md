@@ -179,6 +179,7 @@ RUST_LOG=debug
 
 - `GET /health`
 - `GET /dashboard`
+- `GET /dashboard/rules/{id}`
 - `GET /v1/events`
 - `POST /v1/dom/analyze`
 - `POST /v1/dom/feedback`
