@@ -171,6 +171,36 @@ fn extracts_x_post_from_dom_snapshot_link() {
 }
 
 #[test]
+fn uses_x_post_text_metadata_instead_of_full_article_chrome() {
+    let mut element = element(
+        "client-1",
+        "@alice May 31Anyone who used a computer between 1985-2010. What game?25K4K",
+        Some("https://x.com/alice/status/12345"),
+    );
+    element.metadata = json!({
+        "xCom": {
+            "postText": "Anyone who used a computer between 1985-2010. What game?",
+        },
+    });
+
+    let extracted = extract_items(&batch(vec![element]));
+
+    assert_eq!(extracted.len(), 1);
+    assert_eq!(
+        extracted[0].item.text,
+        "Anyone who used a computer between 1985-2010. What game?"
+    );
+    assert_eq!(
+        extracted[0]
+            .item
+            .metadata
+            .pointer("/xCom/snapshotText")
+            .and_then(serde_json::Value::as_str),
+        Some("@alice May 31Anyone who used a computer between 1985-2010. What game?25K4K")
+    );
+}
+
+#[test]
 fn ignores_x_dom_regions_without_status_identity() {
     let batch = batch(vec![element("client-1", "navigation", None)]);
 

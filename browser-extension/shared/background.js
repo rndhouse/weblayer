@@ -299,7 +299,8 @@ function normalizeElement(element) {
       : [],
     links: Array.isArray(element.links) ? element.links.map(normalizeLink) : [],
     snapshotHash: stringOrNull(element.snapshotHash),
-    capturedAt: stringOrNull(element.capturedAt)
+    capturedAt: stringOrNull(element.capturedAt),
+    metadata: objectOrNull(element.metadata)
   };
 }
 
@@ -502,4 +503,8 @@ function stringOrEmpty(value) {
 
 function stringOrNull(value) {
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function objectOrNull(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
 }

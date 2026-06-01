@@ -49,6 +49,7 @@ fn extract_item(
     let replying_to_handles = metadata
         .map(|metadata| metadata_string_list(metadata, "replyingToHandles"))
         .unwrap_or_default();
+    let post_text = metadata.and_then(|metadata| metadata_string(metadata, "postText"));
     let relationship = XPostRelationship {
         post_id: post_id.clone(),
         author_handle: author.clone(),
@@ -63,7 +64,7 @@ fn extract_item(
         content_id: Some(post_id.clone()),
         url: status_href,
         author,
-        text: element.text.clone(),
+        text: post_text.clone().unwrap_or_else(|| element.text.clone()),
         captured_at: element
             .captured_at
             .clone()
@@ -83,6 +84,8 @@ fn extract_item(
                 "parentPostId": relationship.parent_post_id.clone(),
                 "replyAncestorPostIds": relationship.reply_ancestor_post_ids.clone(),
                 "replyingToHandles": relationship.replying_to_handles.clone(),
+                "postText": post_text,
+                "snapshotText": element.text,
             },
         }),
     };

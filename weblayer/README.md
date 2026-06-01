@@ -332,6 +332,7 @@ DOM analysis request shape:
         "xCom": {
           "postId": "123",
           "authorHandle": "@user",
+          "postText": "Post text",
           "visibleIndex": 0,
           "replyingToHandles": []
         }

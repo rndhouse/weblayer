@@ -16,6 +16,8 @@ class FakeElement {
     };
     this.width = layout.width === undefined ? 320 : layout.width;
     this.height = layout.height === undefined ? 80 : layout.height;
+    this.innerText = layout.text || "";
+    this.textContent = layout.text || "";
   }
 
   append(...children) {
@@ -47,6 +49,12 @@ class FakeElement {
   }
 
   matches(selector) {
+    if (selector === "main") {
+      return this.tagName === "MAIN";
+    }
+    if (selector === "article[data-testid='tweet']") {
+      return this.tagName === "ARTICLE" && this.attributes["data-testid"] === "tweet";
+    }
     if (selector === "aside") {
       return this.tagName === "ASIDE";
     }
@@ -59,11 +67,26 @@ class FakeElement {
     if (selector === "[data-weblayer-ui='true']") {
       return this.attributes["data-weblayer-ui"] === "true";
     }
+    if (selector === "[data-testid='tweetText']") {
+      return this.attributes["data-testid"] === "tweetText";
+    }
     if (selector === "[aria-label^='Timeline:']") {
       return String(this.attributes["aria-label"] || "").startsWith("Timeline:");
     }
 
     return false;
+  }
+
+  closest(selector) {
+    let element = this;
+    while (element) {
+      if (element.matches(selector)) {
+        return element;
+      }
+      element = element.parentElement;
+    }
+
+    return null;
   }
 
   getBoundingClientRect() {
@@ -97,6 +120,39 @@ function loadAdapters(root) {
   });
 
   return context.window.WebLayerSiteAdapters;
+}
+
+function loadBackground() {
+  const context = {
+    AbortController,
+    URL,
+    WebSocket: function WebSocket() {},
+    chrome: {
+      runtime: {
+        onMessage: {
+          addListener() {}
+        }
+      },
+      storage: {
+        local: {
+          get(_defaults, callback) {
+            callback({});
+          }
+        }
+      }
+    },
+    clearTimeout,
+    fetch,
+    setTimeout
+  };
+  const scriptPath = path.join(__dirname, "..", "shared", "background.js");
+  vm.runInNewContext(
+    `${fs.readFileSync(scriptPath, "utf8")}\nthis.__normalizeElement = normalizeElement;`,
+    context,
+    { filename: scriptPath }
+  );
+
+  return context;
 }
 
 function testXDebugStatsMountPrefersSidebarTimeline() {
@@ -153,6 +209,54 @@ function testXDebugStatsMountFallsBackToVisibleSidebarChild() {
   );
 }
 
+function testXMetadataIncludesTweetBodyText() {
+  const root = new FakeElement("document");
+  const main = new FakeElement("main");
+  const article = new FakeElement("article", { "data-testid": "tweet" }, {
+    width: 500,
+    height: 160
+  });
+  const tweetText = new FakeElement("div", { "data-testid": "tweetText" }, {
+    text: "Anyone who used a computer between 1985-2010. What game?"
+  });
+
+  article.append(tweetText);
+  main.append(article);
+  root.append(main);
+
+  const adapters = loadAdapters(root);
+  const context = adapters.current({ href: "https://x.com/home" }, root);
+  const metadata = context.metadataForElement(article, {
+    text: "@alice May 31Anyone who used a computer between 1985-2010. What game?25K4K",
+    links: [{ href: "https://x.com/alice/status/12345" }]
+  });
+
+  assert.strictEqual(
+    metadata.xCom.postText,
+    "Anyone who used a computer between 1985-2010. What game?"
+  );
+}
+
+function testBackgroundPreservesElementMetadata() {
+  const background = loadBackground();
+  const normalized = background.__normalizeElement({
+    clientId: "client-1",
+    metadata: {
+      xCom: {
+        postText: "Body text"
+      }
+    }
+  });
+
+  assert.deepStrictEqual(normalized.metadata, {
+    xCom: {
+      postText: "Body text"
+    }
+  });
+}
+
 testXDebugStatsMountPrefersSidebarTimeline();
 testXDebugStatsMountFallsBackToVisibleSidebarChild();
+testXMetadataIncludesTweetBodyText();
+testBackgroundPreservesElementMetadata();
 console.log("x debug stats mount tests passed");

@@ -102,7 +102,14 @@ WebSocket request shape:
         }
       ],
       "snapshotHash": "abc123",
-      "capturedAt": "2026-05-21T10:00:00.000Z"
+      "capturedAt": "2026-05-21T10:00:00.000Z",
+      "metadata": {
+        "xCom": {
+          "postId": "123",
+          "authorHandle": "@user",
+          "postText": "Post text"
+        }
+      }
     }
   ]
 }
@@ -169,7 +176,14 @@ Feedback request shape:
       }
     ],
     "snapshotHash": "abc123",
-    "capturedAt": "2026-05-21T10:00:00.000Z"
+    "capturedAt": "2026-05-21T10:00:00.000Z",
+    "metadata": {
+      "xCom": {
+        "postId": "123",
+        "authorHandle": "@user",
+        "postText": "Post text"
+      }
+    }
   },
   "feedbackContextId": "xfctx-0123456789abcdef"
 }

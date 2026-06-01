@@ -107,10 +107,19 @@
         pageKind,
         postId: effectivePostId,
         authorHandle: authorHandleFromLinks(snapshot.links),
+        postText: xComPostTextFromElement(element),
         visibleIndex: visibleIndex >= 0 ? visibleIndex : null,
         replyingToHandles: replyingToHandlesFromText(snapshot.text)
       }
     };
+  }
+
+  function xComPostTextFromElement(element) {
+    const textNode = Array.from(element.querySelectorAll("[data-testid='tweetText']"))
+      .find((node) => node.closest(X_COM_POST_SELECTOR) === element);
+    const text = textNode ? normalizeText(textNode.innerText || textNode.textContent || "") : "";
+
+    return text || null;
   }
 
   function statusIdFromLinks(links) {
@@ -209,6 +218,10 @@
   function normalizedPath(pathname) {
     const path = String(pathname || "/").replace(/\/+$/, "");
     return path || "/";
+  }
+
+  function normalizeText(text) {
+    return String(text || "").replace(/\s+/g, " ").trim();
   }
 
   window.WebLayerSiteAdapters = { current };

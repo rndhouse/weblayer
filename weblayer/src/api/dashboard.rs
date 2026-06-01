@@ -734,7 +734,11 @@ const RULE_DASHBOARD_HTML: &str = r##"<!doctype html>
         }
       }
       if (strippedChrome) {
-        value = value.replace(/^(?:·\s*)?(?:now|\d+[smhd])\s*/i, "").trim();
+        value = value.replace(
+          /^(?:·\s*)?(?:(?:now|\d+[smhd])|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2})\s*/i,
+          ""
+        ).trim();
+        value = value.replace(/([.!?])(?:\d+(?:\.\d+)?[KMB]?){2,}$/i, "$1").trim();
         value = value.replace(/([.!?A-Za-z])\d{3,}(?:[KMB])?$/i, "$1").trim();
       }
 
