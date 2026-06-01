@@ -493,8 +493,14 @@ const RULE_DASHBOARD_HTML: &str = r##"<!doctype html>
       overflow-wrap: anywhere;
     }
 
-    .line {
+    .detail-row {
+      display: grid;
+      grid-template-columns: 132px minmax(0, 1fr);
+      gap: 10px;
       margin-top: 6px;
+    }
+
+    .line {
       color: var(--muted);
       overflow-wrap: anywhere;
     }
@@ -502,6 +508,28 @@ const RULE_DASHBOARD_HTML: &str = r##"<!doctype html>
     .line-label {
       color: var(--text);
       font-weight: 700;
+    }
+
+    .post-text {
+      margin-top: 4px;
+      padding: 10px;
+      border: 1px solid rgba(148, 163, 184, 0.22);
+      border-radius: 6px;
+      background: rgba(15, 23, 42, 0.42);
+      color: var(--text);
+      line-height: 1.55;
+      overflow-wrap: break-word;
+      white-space: pre-wrap;
+    }
+
+    .raw-capture {
+      margin-top: 8px;
+      color: var(--muted);
+    }
+
+    .raw-capture summary {
+      cursor: pointer;
+      color: var(--accent);
     }
 
     .empty, .error {
@@ -529,6 +557,10 @@ const RULE_DASHBOARD_HTML: &str = r##"<!doctype html>
 
       .stat, .panel {
         margin-top: 12px;
+      }
+
+      .detail-row {
+        display: block;
       }
     }
   </style>
@@ -646,14 +678,30 @@ const RULE_DASHBOARD_HTML: &str = r##"<!doctype html>
       return container;
     }
 
-    function line(label, value) {
+    function line(label, value, options = {}) {
       const node = document.createElement("div");
       const labelNode = document.createElement("span");
-      node.className = "line";
+      const valueNode = document.createElement(options.block ? "div" : "span");
+      node.className = "detail-row";
       labelNode.className = "line-label";
       labelNode.textContent = `${label}: `;
-      node.append(labelNode, document.createTextNode(text(value)));
+      valueNode.className = options.block ? "post-text" : "line";
+      valueNode.textContent = text(value);
+      node.append(labelNode, valueNode);
       return node;
+    }
+
+    function rawCaptureDetails(rawText) {
+      const details = document.createElement("details");
+      const summary = document.createElement("summary");
+      const value = document.createElement("div");
+
+      details.className = "raw-capture";
+      summary.textContent = "Raw capture";
+      value.className = "post-text";
+      value.textContent = text(rawText);
+      details.append(summary, value);
+      return details;
     }
 
     function catchPill(entry) {
@@ -668,16 +716,54 @@ const RULE_DASHBOARD_HTML: &str = r##"<!doctype html>
       return content.author || content.contentId || content.storageKey || `event ${entry.eventId}`;
     }
 
+    function readableCapturedText(rawText, author) {
+      const raw = String(rawText || "");
+      const compact = raw.replace(/\s+/g, " ").trim();
+      if (!compact) {
+        return { value: "", changed: false };
+      }
+
+      let value = compact.replace(/\s*·\s*/g, " · ");
+      let strippedChrome = false;
+      const authorText = String(author || "").trim().toLowerCase();
+      if (authorText) {
+        const authorIndex = value.toLowerCase().indexOf(authorText);
+        if (authorIndex >= 0 && authorIndex <= 80) {
+          value = value.slice(authorIndex + authorText.length).trim();
+          strippedChrome = true;
+        }
+      }
+      if (strippedChrome) {
+        value = value.replace(/^(?:·\s*)?(?:now|\d+[smhd])\s*/i, "").trim();
+        value = value.replace(/([.!?A-Za-z])\d{3,}(?:[KMB])?$/i, "$1").trim();
+      }
+
+      value = value
+        .replace(/\s*·\s*/g, " · ")
+        .replace(/([a-z])(\d{2,}(?:[KMB])?)$/i, "$1 $2")
+        .replace(/\s+/g, " ")
+        .trim();
+
+      return {
+        value: value || compact,
+        changed: value.length > 0 && value !== compact
+      };
+    }
+
     function catchItem(entry) {
       const content = entry.content || {};
+      const capturedText = readableCapturedText(content.text, content.author);
       const container = item(catchTitle(entry), "", catchPill(entry));
       const body = container.querySelector(".body");
       body.replaceChildren(
         line("Why it was caught", entry.reason || "No reason recorded."),
-        line("Post text", content.text || "No stored text."),
+        line("Captured text", capturedText.value || "No stored text.", { block: true }),
         line("Seen", formatTime(entry.caughtAtUnixMs)),
         line("Source", entry.source)
       );
+      if (capturedText.changed) {
+        body.append(rawCaptureDetails(content.text));
+      }
       if (content.url) {
         const link = document.createElement("a");
         link.href = content.url;
@@ -774,5 +860,8 @@ mod tests {
         assert!(html.contains("/v1/rules/${encodeURIComponent(ruleId)}?site="));
         assert!(html.contains("/catches?site="));
         assert!(html.contains("Caught Instances"));
+        assert!(html.contains("readableCapturedText"));
+        assert!(html.contains("Captured text"));
+        assert!(html.contains("Raw capture"));
     }
 }
