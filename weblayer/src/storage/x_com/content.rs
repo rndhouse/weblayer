@@ -10,7 +10,7 @@ use crate::{
 use rusqlite::{params, Row};
 use serde::Serialize;
 use std::collections::HashMap;
-use tracing::debug;
+use tracing::trace;
 
 impl Store {
     pub(in crate::storage) fn record_batch(&mut self, batch: &AnalysisBatch) -> Result<()> {
@@ -74,7 +74,7 @@ impl Store {
 
         transaction.commit()?;
 
-        debug!(
+        trace!(
             target: "weblayer_daemon::storage::x_com",
             source = batch.source.as_str(),
             stored_count,
