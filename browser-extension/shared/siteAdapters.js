@@ -62,12 +62,26 @@
   function xComDebugStatsMount(root) {
     const sidebar = root.querySelector("[data-testid='sidebarColumn']");
     if (sidebar instanceof Element && isVisibleElement(sidebar)) {
-      return sidebar;
+      return xComSidebarContentMount(sidebar) || sidebar;
     }
 
     for (const element of root.querySelectorAll("aside, [role='complementary']")) {
       if (element instanceof Element && isVisibleElement(element)) {
-        return element;
+        return xComSidebarContentMount(element) || element;
+      }
+    }
+
+    return null;
+  }
+
+  function xComSidebarContentMount(sidebar) {
+    for (const child of sidebar.children) {
+      if (
+        child instanceof Element &&
+        !child.matches("[data-weblayer-ui='true']") &&
+        isVisibleElement(child)
+      ) {
+        return child;
       }
     }
 

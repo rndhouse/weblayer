@@ -209,11 +209,14 @@
 }
 
 .weblayer-debug-stats-panel--inline {
-  position: relative;
+  display: block !important;
+  position: relative !important;
   z-index: 1;
-  width: auto;
-  max-height: none;
+  width: 100% !important;
+  height: auto !important;
+  max-height: none !important;
   margin: 12px 0;
+  overflow: visible !important;
 }
 
 .weblayer-debug-stats-panel--overlay {
