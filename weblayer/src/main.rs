@@ -12,6 +12,7 @@ use tracing_subscriber::EnvFilter;
 
 const DEFAULT_BIND_ADDR: &str = "127.0.0.1:17891";
 const BIND_ADDR_ENV: &str = "WEBLAYER_BIND_ADDR";
+const DEFAULT_LOG_FILTER: &str = "debug,tungstenite::protocol=info";
 
 #[tokio::main]
 async fn main() {
@@ -34,7 +35,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 async fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
         .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("debug")),
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new(DEFAULT_LOG_FILTER)),
         )
         .with_writer(std::io::stdout)
         .init();
