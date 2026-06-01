@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{
     core::{ContentDecision, ContentItem, DecisionAction},
-    storage::RuleDecisionStats,
+    storage::{RuleCatch, RuleCatchPage, RuleCatchQuery, RuleDecisionStats, StoredContentItem},
 };
 use rusqlite::params;
 use std::collections::{BTreeMap, BTreeSet};
@@ -97,12 +97,125 @@ impl Store {
             })
             .collect())
     }
+
+    pub(in crate::storage) fn rule_catches(
+        &self,
+        rule_id: &str,
+        query: RuleCatchQuery,
+    ) -> Result<Option<RuleCatchPage>> {
+        let Some(rule_id) = clean_optional(Some(rule_id)) else {
+            return Ok(None);
+        };
+        if !self.rule_exists(&rule_id)? {
+            return Ok(None);
+        }
+
+        let limit = query.limit.min(i64::MAX as usize);
+        let offset = query.offset.min(i64::MAX as usize);
+        let mut statement = self.connection.prepare(
+            "
+            SELECT
+                events.id,
+                events.created_at_unix_ms,
+                events.action,
+                events.matched_rule_ids_json,
+                events.reason,
+                events.confidence,
+                events.source,
+                events.storage_key,
+                COALESCE(tweets.post_id, events.post_id),
+                tweets.url,
+                tweets.author_handle,
+                COALESCE(tweets.text, ''),
+                COALESCE(tweets.first_seen_at_unix_ms, events.created_at_unix_ms),
+                COALESCE(tweets.last_seen_at_unix_ms, events.created_at_unix_ms),
+                COALESCE(tweets.seen_count, 0),
+                tweets.latest_captured_at
+            FROM content_decision_events events
+            LEFT JOIN tweets ON tweets.storage_key = events.storage_key
+            WHERE events.site = ?1
+                AND events.action = 'hide'
+            ORDER BY events.created_at_unix_ms DESC, events.id DESC
+            ",
+        )?;
+        let rows = statement.query_map(params![SITE_DIR], |row| {
+            Ok(RuleCatchCandidate {
+                matched_rule_ids_json: row.get(3)?,
+                caught: RuleCatch {
+                    event_id: row.get(0)?,
+                    caught_at_unix_ms: row.get(1)?,
+                    action: row.get(2)?,
+                    reason: row.get(4)?,
+                    confidence: row.get(5)?,
+                    source: row.get(6)?,
+                    content: StoredContentItem {
+                        content_kind: "post".into(),
+                        storage_key: row.get(7)?,
+                        content_id: row.get(8)?,
+                        url: row.get(9)?,
+                        author: row.get(10)?,
+                        text: row.get(11)?,
+                        snippet: None,
+                        first_seen_at_unix_ms: row.get(12)?,
+                        last_seen_at_unix_ms: row.get(13)?,
+                        seen_count: row.get(14)?,
+                        latest_captured_at: row.get(15)?,
+                    },
+                },
+            })
+        })?;
+        let mut total_matching = 0usize;
+        let mut items = Vec::new();
+
+        for row in rows {
+            let candidate = row?;
+            let matched_rule_ids = parse_matched_rule_ids(&candidate.matched_rule_ids_json)?;
+            if !matched_rule_ids.iter().any(|id| id == &rule_id) {
+                continue;
+            }
+
+            if total_matching >= offset && items.len() < limit {
+                items.push(candidate.caught);
+            }
+            total_matching += 1;
+        }
+
+        Ok(Some(RuleCatchPage {
+            rule_id,
+            total_matching,
+            limit,
+            offset,
+            items,
+        }))
+    }
+
+    fn rule_exists(&self, rule_id: &str) -> Result<bool> {
+        let exists = self.connection.query_row(
+            "
+            SELECT EXISTS(
+                SELECT 1
+                FROM content_rules
+                WHERE site = ?1
+                    AND id = ?2
+            )
+            ",
+            params![SITE_DIR, rule_id],
+            |row| row.get::<_, i64>(0),
+        )?;
+
+        Ok(exists != 0)
+    }
 }
 
 #[derive(Default)]
 struct RuleDecisionStatsBuilder {
     matched_count: usize,
     hide_count: usize,
+}
+
+struct RuleCatchCandidate {
+    matched_rule_ids_json: String,
+    caught: RuleCatch,
 }
 
 fn should_record_decision(decision: &ContentDecision) -> bool {

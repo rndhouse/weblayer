@@ -196,6 +196,7 @@ RUST_LOG=debug
 - `GET /v1/rules/{id}?site=x.com`
 - `POST /v1/rules/{id}?site=x.com`
 - `POST /v1/rules/{id}/status?site=x.com`
+- `GET /v1/rules/{id}/catches?site=x.com`
 - `GET /v1/rules/{id}/validate?site=x.com`
 
 `/v1/events` is the primary extension path. The extension opens a WebSocket,
@@ -218,6 +219,8 @@ metadata to stored content without changing the original captured content.
 `/v1/rules` manages site-scoped filtering rules. New rules default to `draft`;
 only `active` rules are sent to the AI analyzer. Rule status values are
 `draft`, `active`, `disabled`, and `archived`.
+`/v1/rules/{id}/catches` lists recent hidden posts where that rule matched the
+final decision, which powers rule evidence in the dashboard.
 `/v1/rule-proposals` generates and stores reviewable rule-set change proposals
 from active feedback. Proposal generation sends active feedback, current active
 rules, feedback-time rule snapshots, and simple per-rule match/hide counts to

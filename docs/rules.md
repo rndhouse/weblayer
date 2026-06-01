@@ -116,3 +116,9 @@ Validate a rule against stored X.com posts:
 ```http
 GET http://127.0.0.1:17891/v1/rules/x-ai-slop/validate?site=x.com&limit=20
 ```
+
+List recent hidden posts where a rule matched the final decision:
+
+```http
+GET http://127.0.0.1:17891/v1/rules/x-ai-slop/catches?site=x.com&limit=10
+```

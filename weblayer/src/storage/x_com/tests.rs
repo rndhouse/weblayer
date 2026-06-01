@@ -9,8 +9,8 @@ use crate::{
         FeedbackRuleContext,
     },
     storage::{
-        ContentAnnotationInput, ContentAnnotationQuery, ContentQuery, RuleCreateInput,
-        RuleExamples, RuleQuery, RuleSetProposalAction, RuleSetProposalChange,
+        ContentAnnotationInput, ContentAnnotationQuery, ContentQuery, RuleCatchQuery,
+        RuleCreateInput, RuleExamples, RuleQuery, RuleSetProposalAction, RuleSetProposalChange,
         RuleSetProposalCreateInput, RuleSetProposalQuery, RuleStatusInput, RuleSuggestionQuery,
         RuleUpdateInput, RuleValidationQuery, XDislikeQuery,
     },
@@ -223,6 +223,28 @@ fn records_rule_decision_events_and_stats() {
     let kept = item("client-3", Some("789"), "ordinary post");
 
     store
+        .create_rule(RuleCreateInput {
+            id: Some("x-engagement".into()),
+            status: Some("active".into()),
+            priority: Some(10),
+            title: "Engagement".into(),
+            instruction: "Hide engagement bait.".into(),
+            created_source: "test".into(),
+            examples: RuleExamples::default(),
+        })
+        .expect("first rule should store");
+    store
+        .create_rule(RuleCreateInput {
+            id: Some("x-bait".into()),
+            status: Some("active".into()),
+            priority: Some(20),
+            title: "Bait".into(),
+            instruction: "Hide bait.".into(),
+            created_source: "test".into(),
+            examples: RuleExamples::default(),
+        })
+        .expect("second rule should store");
+    store
         .record_batch(&batch(
             "x.com",
             vec![first.clone(), second.clone(), kept.clone()],
@@ -269,6 +291,50 @@ fn records_rule_decision_events_and_stats() {
     assert_eq!(stats[1].rule_id, "x-engagement");
     assert_eq!(stats[1].matched_count, 2);
     assert_eq!(stats[1].hide_count, 2);
+
+    let catches = store
+        .rule_catches(
+            "x-engagement",
+            RuleCatchQuery {
+                limit: 10,
+                offset: 0,
+            },
+        )
+        .expect("rule catches should load")
+        .expect("rule should exist");
+    assert_eq!(catches.rule_id, "x-engagement");
+    assert_eq!(catches.total_matching, 2);
+    assert_eq!(catches.items.len(), 2);
+    assert_eq!(catches.items[0].content.text, "engagement bait two");
+    assert_eq!(
+        catches.items[0].reason.as_deref(),
+        Some("Matched two rules")
+    );
+
+    let paged_catches = store
+        .rule_catches(
+            "x-engagement",
+            RuleCatchQuery {
+                limit: 1,
+                offset: 1,
+            },
+        )
+        .expect("paged catches should load")
+        .expect("rule should exist");
+    assert_eq!(paged_catches.total_matching, 2);
+    assert_eq!(paged_catches.items.len(), 1);
+    assert_eq!(paged_catches.items[0].content.text, "engagement bait one");
+
+    assert!(store
+        .rule_catches(
+            "missing-rule",
+            RuleCatchQuery {
+                limit: 10,
+                offset: 0,
+            },
+        )
+        .expect("missing rule should not error")
+        .is_none());
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap().parent().unwrap());
 }

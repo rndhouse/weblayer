@@ -69,4 +69,5 @@ WEBLAYER_X_DEBUG_STATS=1 weblayer daemon
 - `GET /v1/rules/{id}?site=x.com`
 - `POST /v1/rules/{id}?site=x.com`
 - `POST /v1/rules/{id}/status?site=x.com`
+- `GET /v1/rules/{id}/catches?site=x.com`
 - `GET /v1/rules/{id}/validate?site=x.com`

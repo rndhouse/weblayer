@@ -137,6 +137,51 @@ pub struct RuleDecisionStats {
     pub hide_count: usize,
 }
 
+/// Query options for listing posts hidden after one rule matched.
+#[derive(Debug, Clone)]
+pub struct RuleCatchQuery {
+    /// Maximum number of caught instances to return.
+    pub limit: usize,
+    /// Number of caught instances to skip.
+    pub offset: usize,
+}
+
+/// Page of recent hidden posts where one rule matched the final decision.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleCatchPage {
+    /// Stable rule ID.
+    pub rule_id: String,
+    /// Number of matching hide decision events before pagination.
+    pub total_matching: usize,
+    /// Maximum number of rows requested.
+    pub limit: usize,
+    /// Number of matching rows skipped.
+    pub offset: usize,
+    /// Matching caught instances.
+    pub items: Vec<RuleCatch>,
+}
+
+/// One hidden post instance where a content rule matched.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleCatch {
+    /// Database row ID for the recorded decision event.
+    pub event_id: i64,
+    /// Timestamp when the decision event was recorded.
+    pub caught_at_unix_ms: i64,
+    /// Final action recorded for this event.
+    pub action: String,
+    /// Agent-supplied reason for the final decision when available.
+    pub reason: Option<String>,
+    /// Agent confidence from 0.0 to 1.0 when available.
+    pub confidence: Option<f64>,
+    /// Source that recorded the decision event.
+    pub source: String,
+    /// Stored content attached to the decision event.
+    pub content: StoredContentItem,
+}
+
 /// Queue and browsing counters used to decide when rule curation should run.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -902,6 +947,15 @@ impl ContentStore {
             .lock()
             .expect("X storage mutex should not be poisoned");
         db.rule_decision_stats()
+    }
+
+    /// Lists recent hidden X/Twitter posts where one rule matched.
+    pub fn x_rule_catches(&self, id: &str, query: RuleCatchQuery) -> Result<Option<RuleCatchPage>> {
+        let db = self
+            .x_com
+            .lock()
+            .expect("X storage mutex should not be poisoned");
+        db.rule_catches(id, query)
     }
 
     /// Lists or searches stored X/Twitter content.

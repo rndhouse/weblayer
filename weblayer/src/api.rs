@@ -68,6 +68,7 @@ pub fn router() -> Result<Router, StorageError> {
             "/v1/rules/{rule_id}/status",
             post(rules::update_rule_status),
         )
+        .route("/v1/rules/{rule_id}/catches", get(rules::rule_catches))
         .route("/v1/rules/{rule_id}/validate", get(rules::validate_rule))
         .with_state(state)
         .layer(cors_layer()))

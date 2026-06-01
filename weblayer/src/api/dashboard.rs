@@ -4,7 +4,7 @@ pub(super) async fn dashboard() -> Html<&'static str> {
     Html(DASHBOARD_HTML)
 }
 
-const DASHBOARD_HTML: &str = r#"<!doctype html>
+const DASHBOARD_HTML: &str = r##"<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -91,6 +91,10 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
       min-width: 0;
     }
 
+    .panel + .panel {
+      margin-top: 12px;
+    }
+
     .stat {
       padding: 12px;
     }
@@ -118,6 +122,23 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
       background: var(--panel-2);
     }
 
+    .item-button {
+      appearance: none;
+      display: block;
+      width: 100%;
+      color: inherit;
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .item-button:hover,
+    .item-button:focus-visible,
+    .item-selected {
+      border-color: var(--accent);
+      outline: none;
+    }
+
     .item-title {
       display: flex;
       justify-content: space-between;
@@ -133,6 +154,7 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
     }
 
     .body {
+      display: block;
       margin-top: 6px;
       color: var(--muted);
       overflow-wrap: anywhere;
@@ -186,9 +208,16 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
     </section>
 
     <section class="layout">
-      <div class="panel">
-        <h2>Active Rules</h2>
-        <div id="rules" class="list"></div>
+      <div>
+        <div class="panel">
+          <h2>Active Rules</h2>
+          <div id="rules" class="list"></div>
+        </div>
+        <div class="panel">
+          <h2 id="ruleCatchesTitle">Caught Posts</h2>
+          <div id="ruleCatchesMeta" class="meta">Select a rule.</div>
+          <div id="ruleCatches" class="list"></div>
+        </div>
       </div>
 
       <div>
@@ -249,14 +278,22 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
       }
     }
 
-    function item(title, body, pill) {
-      const container = document.createElement("div");
-      const heading = document.createElement("div");
-      const titleNode = document.createElement("div");
-      const pillNode = document.createElement("div");
-      const bodyNode = document.createElement("div");
+    let selectedRuleId = null;
+    let selectedRuleTitle = null;
+    let catchRequestId = 0;
+
+    function item(title, body, pill, tagName = "div") {
+      const container = document.createElement(tagName);
+      const heading = document.createElement("span");
+      const titleNode = document.createElement("span");
+      const pillNode = document.createElement("span");
+      const bodyNode = document.createElement("span");
 
       container.className = "item";
+      if (tagName === "button") {
+        container.type = "button";
+        container.classList.add("item-button");
+      }
       heading.className = "item-title";
       titleNode.textContent = text(title);
       pillNode.className = "pill";
@@ -266,6 +303,104 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
       heading.append(titleNode, pillNode);
       container.append(heading, bodyNode);
       return container;
+    }
+
+    function catchPill(entry) {
+      const confidence = typeof entry.confidence === "number"
+        ? `${Math.round(entry.confidence * 100)}%`
+        : "";
+      return confidence ? `${entry.action} ${confidence}` : entry.action;
+    }
+
+    function catchBody(entry) {
+      const content = entry.content || {};
+      return [entry.reason, content.text].filter(Boolean).join(" | ");
+    }
+
+    function catchTitle(entry) {
+      const content = entry.content || {};
+      return content.author || content.contentId || content.storageKey || `event ${entry.eventId}`;
+    }
+
+    function renderRule(rule) {
+      const node = item(rule.title, rule.instruction, `p${rule.priority}`, "button");
+      node.dataset.ruleId = rule.id;
+      if (rule.id === selectedRuleId) {
+        node.classList.add("item-selected");
+      }
+      node.addEventListener("click", () => {
+        selectedRuleId = rule.id;
+        selectedRuleTitle = rule.title;
+        renderSelectedRuleState();
+        void loadRuleCatches(rule);
+      });
+      return node;
+    }
+
+    function renderSelectedRuleState() {
+      for (const node of document.querySelectorAll("#rules .item-button")) {
+        node.classList.remove("item-selected");
+        if (node.dataset.ruleId === selectedRuleId) {
+          node.classList.add("item-selected");
+        }
+      }
+      const title = selectedRuleTitle || "Caught Posts";
+      document.getElementById("ruleCatchesTitle").textContent = "Caught Posts";
+      document.getElementById("ruleCatchesMeta").textContent = selectedRuleId
+        ? title
+        : "Select a rule.";
+    }
+
+    async function loadRuleCatches(rule) {
+      const requestId = ++catchRequestId;
+      const root = document.getElementById("ruleCatches");
+      root.replaceChildren(empty("Loading caught posts..."));
+
+      try {
+        const response = await json(
+          `/v1/rules/${encodeURIComponent(rule.id)}/catches?site=${encodeURIComponent(SITE)}&limit=10`
+        );
+        if (requestId !== catchRequestId) {
+          return;
+        }
+
+        document.getElementById("ruleCatchesMeta").textContent =
+          `${rule.title}; ${response.totalMatching || 0} recorded`;
+        renderList(
+          "ruleCatches",
+          response.items,
+          (entry) => item(catchTitle(entry), catchBody(entry), catchPill(entry)),
+          "No caught posts recorded for this rule."
+        );
+      } catch (error) {
+        if (requestId !== catchRequestId) {
+          return;
+        }
+        root.replaceChildren(errorNode(error));
+      }
+    }
+
+    function renderRules(rules) {
+      const items = Array.isArray(rules.items) ? rules.items : [];
+      if (items.length === 0) {
+        catchRequestId += 1;
+        selectedRuleId = null;
+        selectedRuleTitle = null;
+        renderList("rules", items, renderRule, "No active rules.");
+        document.getElementById("ruleCatchesMeta").textContent = "Select a rule.";
+        document.getElementById("ruleCatches").replaceChildren(empty("No active rules."));
+        return;
+      }
+
+      let selectedRule = items.find((rule) => rule.id === selectedRuleId);
+      if (!selectedRule) {
+        selectedRule = items[0];
+        selectedRuleId = selectedRule.id;
+      }
+      selectedRuleTitle = selectedRule.title;
+      renderList("rules", items, renderRule, "No active rules.");
+      renderSelectedRuleState();
+      void loadRuleCatches(selectedRule);
     }
 
     function proposalSummary(proposal) {
@@ -286,12 +421,7 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
         setText("postEncounters", stats.stats && stats.stats.totalEncounters);
         setText("activeFeedback", feedback.totalMatching);
         setText("activeRules", rules.totalMatching);
-        renderList(
-          "rules",
-          rules.items,
-          (rule) => item(rule.title, rule.instruction, `p${rule.priority}`),
-          "No active rules."
-        );
+        renderRules(rules);
         renderList(
           "feedback",
           feedback.items,
@@ -306,7 +436,7 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
         );
         document.getElementById("updated").textContent = `Updated ${new Date().toLocaleTimeString()}`;
       } catch (error) {
-        for (const id of ["rules", "feedback", "proposals"]) {
+        for (const id of ["rules", "ruleCatches", "feedback", "proposals"]) {
           document.getElementById(id).replaceChildren(errorNode(error));
         }
         document.getElementById("updated").textContent = "Load failed";
@@ -318,7 +448,7 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
   </script>
 </body>
 </html>
-"#;
+"##;
 
 #[cfg(test)]
 mod tests {
@@ -330,6 +460,7 @@ mod tests {
 
         assert!(html.contains("/v1/content/stats?site="));
         assert!(html.contains("/v1/rules?site="));
+        assert!(html.contains("/catches?site="));
         assert!(html.contains("/v1/feedback?site="));
         assert!(html.contains("/v1/rule-proposals?site="));
     }

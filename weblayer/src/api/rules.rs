@@ -5,10 +5,10 @@ use super::{
     AppState,
 };
 use crate::storage::{
-    ContentRule, RuleAuditEvent, RuleCreateInput, RuleExamples, RuleQuery, RuleSetProposal,
-    RuleSetProposalAction, RuleSetProposalChange, RuleSetProposalCreateInput, RuleSetProposalQuery,
-    RuleStatusInput, RuleSuggestion, RuleSuggestionQuery, RuleUpdateInput, RuleValidationMatch,
-    XDislikeQuery,
+    ContentRule, RuleAuditEvent, RuleCatch, RuleCatchQuery, RuleCreateInput, RuleExamples,
+    RuleQuery, RuleSetProposal, RuleSetProposalAction, RuleSetProposalChange,
+    RuleSetProposalCreateInput, RuleSetProposalQuery, RuleStatusInput, RuleSuggestion,
+    RuleSuggestionQuery, RuleUpdateInput, RuleValidationMatch, XDislikeQuery,
 };
 use axum::{
     extract::{Path as AxumPath, Query, State},
@@ -365,6 +365,34 @@ pub(super) async fn validate_rule(
     }))
 }
 
+pub(super) async fn rule_catches(
+    State(state): State<AppState>,
+    AxumPath(rule_id): AxumPath<String>,
+    Query(query): Query<RuleCatchApiQuery>,
+) -> Result<Json<RuleCatchesResponse>, ApiError> {
+    let site = SiteScope::from_param(query.site.as_deref())?;
+    let limit = query
+        .limit
+        .unwrap_or(DEFAULT_CONTENT_LIMIT)
+        .min(MAX_CONTENT_LIMIT);
+    let offset = query.offset.unwrap_or(0);
+    let page = match site {
+        SiteScope::XCom => state
+            .content_store
+            .x_rule_catches(&rule_id, RuleCatchQuery { limit, offset })?,
+    }
+    .ok_or_else(|| ApiError::not_found(format!("rule not found: {rule_id}")))?;
+
+    Ok(Json(RuleCatchesResponse {
+        site: site.as_str(),
+        rule_id: page.rule_id,
+        total_matching: page.total_matching,
+        limit: page.limit,
+        offset: page.offset,
+        items: page.items,
+    }))
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct RulesQuery {
@@ -417,6 +445,17 @@ pub(super) struct RuleValidationApiQuery {
     /// Site scope for the request, such as `x.com`.
     site: Option<String>,
     /// Maximum number of likely matches to return. Defaults to 100 and is capped at 500.
+    limit: Option<usize>,
+    /// Number of matching rows to skip.
+    offset: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct RuleCatchApiQuery {
+    /// Site scope for the request, such as `x.com`.
+    site: Option<String>,
+    /// Maximum number of caught instances to return. Defaults to 100 and is capped at 500.
     limit: Option<usize>,
     /// Number of matching rows to skip.
     offset: Option<usize>,
@@ -558,6 +597,17 @@ pub(super) struct RuleValidationResponse {
     limit: usize,
     offset: usize,
     items: Vec<RuleValidationMatch>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct RuleCatchesResponse {
+    site: &'static str,
+    rule_id: String,
+    total_matching: usize,
+    limit: usize,
+    offset: usize,
+    items: Vec<RuleCatch>,
 }
 
 fn clean_rule_examples(examples: RuleExamples) -> RuleExamples {
