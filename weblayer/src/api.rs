@@ -39,6 +39,7 @@ pub fn router() -> Result<Router, StorageError> {
     Ok(Router::new()
         .route("/health", get(health))
         .route("/dashboard", get(dashboard::dashboard))
+        .route("/dashboard/posts", get(dashboard::posts_dashboard))
         .route("/dashboard/rules/{rule_id}", get(dashboard::rule_dashboard))
         .route("/v1/events", get(events::events_ws))
         .route("/v1/dom/analyze", post(dom::analyze_dom))

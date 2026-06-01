@@ -8,6 +8,10 @@ pub(super) async fn rule_dashboard() -> Html<&'static str> {
     Html(RULE_DASHBOARD_HTML)
 }
 
+pub(super) async fn posts_dashboard() -> Html<&'static str> {
+    Html(POSTS_DASHBOARD_HTML)
+}
+
 const DASHBOARD_HTML: &str = r##"<!doctype html>
 <html lang="en">
 <head>
@@ -143,6 +147,18 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
       padding: 12px;
     }
 
+    .stat-link {
+      display: block;
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .stat-link:hover,
+    .stat-link:focus-visible {
+      border-color: var(--accent);
+      outline: none;
+    }
+
     .stat-label {
       color: var(--muted);
       font-size: 12px;
@@ -243,7 +259,7 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
     </header>
 
     <section class="grid" aria-label="X stats">
-      <div class="stat"><div class="stat-label">Unique posts</div><div id="uniquePosts" class="stat-value">-</div></div>
+      <a class="stat stat-link" href="/dashboard/posts"><div class="stat-label">Unique posts</div><div id="uniquePosts" class="stat-value">-</div></a>
       <div class="stat"><div class="stat-label">Post encounters</div><div id="postEncounters" class="stat-value">-</div></div>
       <div class="stat"><div class="stat-label">Active feedback</div><div id="activeFeedback" class="stat-value">-</div></div>
       <div class="stat"><div class="stat-label">Active rules</div><div id="activeRules" class="stat-value">-</div></div>
@@ -924,6 +940,332 @@ const RULE_DASHBOARD_HTML: &str = r##"<!doctype html>
 </html>
 "##;
 
+const POSTS_DASHBOARD_HTML: &str = r##"<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WebLayer Stored Posts</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #0f172a;
+      --panel: #111827;
+      --panel-2: #172033;
+      --border: #334155;
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --accent: #7dd3fc;
+      --ok: #86efac;
+      font: 14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    main {
+      width: min(980px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 28px 0 40px;
+    }
+
+    header {
+      display: grid;
+      gap: 8px;
+      margin-bottom: 18px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 24px;
+      letter-spacing: 0;
+    }
+
+    button {
+      font: inherit;
+    }
+
+    .meta {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .post {
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.22);
+    }
+
+    .post-title {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+      font-weight: 700;
+    }
+
+    .pill {
+      flex: 0 0 auto;
+      color: var(--ok);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .post-text {
+      margin-top: 8px;
+      padding: 10px;
+      border: 1px solid rgba(148, 163, 184, 0.22);
+      border-radius: 6px;
+      background: var(--panel-2);
+      color: var(--text);
+      line-height: 1.55;
+      overflow-wrap: break-word;
+      white-space: pre-wrap;
+    }
+
+    .details {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 14px;
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .action-button {
+      min-height: 32px;
+      padding: 0 10px;
+      border: 1px solid var(--accent);
+      border-radius: 6px;
+      background: transparent;
+      color: var(--accent);
+      cursor: pointer;
+      font-weight: 700;
+    }
+
+    .action-button:hover,
+    .action-button:focus-visible {
+      background: rgba(125, 211, 252, 0.12);
+      outline: none;
+    }
+
+    .action-button:disabled {
+      border-color: var(--border);
+      color: var(--muted);
+      cursor: wait;
+    }
+
+    .empty, .error {
+      color: var(--muted);
+      padding: 10px;
+    }
+
+    .error {
+      color: #fca5a5;
+    }
+
+    a {
+      color: var(--accent);
+    }
+
+    @media (max-width: 720px) {
+      main {
+        width: min(100vw - 20px, 680px);
+        padding-top: 18px;
+      }
+
+      .toolbar, .post-title {
+        display: block;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <a href="/dashboard">Dashboard</a>
+      <h1>Stored Posts</h1>
+      <div id="summary" class="meta">Loading...</div>
+    </header>
+
+    <div class="toolbar">
+      <div id="status" class="meta" aria-live="polite"></div>
+      <button id="loadMore" class="action-button" type="button">Load More</button>
+    </div>
+
+    <section id="posts" class="list" aria-label="Stored X posts"></section>
+    <div id="sentinel" aria-hidden="true"></div>
+  </main>
+
+  <script>
+    const SITE = "x.com";
+    const LIMIT = 50;
+    let offset = 0;
+    let totalMatching = null;
+    let loading = false;
+    let done = false;
+
+    async function json(path) {
+      const response = await fetch(path, { headers: { "Accept": "application/json" } });
+      if (!response.ok) {
+        throw new Error(`${path} returned HTTP ${response.status}`);
+      }
+      return response.json();
+    }
+
+    function text(value) {
+      return value === null || value === undefined || value === "" ? "-" : String(value);
+    }
+
+    function formatTime(unixMs) {
+      if (!unixMs) {
+        return "-";
+      }
+      return new Date(unixMs).toLocaleString();
+    }
+
+    function setStatus(message) {
+      document.getElementById("status").textContent = message;
+    }
+
+    function updateSummary() {
+      const total = totalMatching === null ? "-" : totalMatching;
+      document.getElementById("summary").textContent = `${offset} of ${total} posts loaded`;
+    }
+
+    function empty(message) {
+      const node = document.createElement("div");
+      node.className = "empty";
+      node.textContent = message;
+      return node;
+    }
+
+    function errorNode(error) {
+      const node = document.createElement("div");
+      node.className = "error";
+      node.textContent = error instanceof Error ? error.message : String(error);
+      return node;
+    }
+
+    function detail(label, value) {
+      const node = document.createElement("span");
+      node.textContent = `${label}: ${text(value)}`;
+      return node;
+    }
+
+    function postNode(post) {
+      const container = document.createElement("article");
+      const heading = document.createElement("div");
+      const title = document.createElement("div");
+      const pill = document.createElement("div");
+      const body = document.createElement("div");
+      const details = document.createElement("div");
+
+      container.className = "post";
+      heading.className = "post-title";
+      title.textContent = post.author || post.contentId || post.storageKey;
+      pill.className = "pill";
+      pill.textContent = `${post.seenCount || 0} encounters`;
+      body.className = "post-text";
+      body.textContent = text(post.text);
+      details.className = "details";
+      details.append(
+        detail("ID", post.contentId),
+        detail("First seen", formatTime(post.firstSeenAtUnixMs)),
+        detail("Last seen", formatTime(post.lastSeenAtUnixMs))
+      );
+      if (post.url) {
+        const link = document.createElement("a");
+        link.href = post.url;
+        link.target = "_blank";
+        link.rel = "noreferrer";
+        link.textContent = "Open post";
+        details.append(link);
+      }
+
+      heading.append(title, pill);
+      container.append(heading, body, details);
+      return container;
+    }
+
+    async function loadNext() {
+      if (loading || done) {
+        return;
+      }
+
+      loading = true;
+      const button = document.getElementById("loadMore");
+      button.disabled = true;
+      setStatus("Loading posts...");
+
+      try {
+        const page = await json(
+          `/v1/content?site=${encodeURIComponent(SITE)}&limit=${LIMIT}&offset=${offset}`
+        );
+        const posts = document.getElementById("posts");
+        const items = Array.isArray(page.items) ? page.items : [];
+        totalMatching = page.totalMatching;
+
+        if (offset === 0 && items.length === 0) {
+          posts.replaceChildren(empty("No stored posts."));
+        } else {
+          for (const post of items) {
+            posts.append(postNode(post));
+          }
+        }
+
+        offset += items.length;
+        done = items.length === 0 || offset >= totalMatching;
+        setStatus(done ? "All stored posts loaded." : "Scroll for more posts.");
+        updateSummary();
+      } catch (error) {
+        document.getElementById("posts").append(errorNode(error));
+        setStatus("Load failed.");
+      } finally {
+        loading = false;
+        button.disabled = done;
+      }
+    }
+
+    document.getElementById("loadMore").addEventListener("click", () => {
+      void loadNext();
+    });
+
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        void loadNext();
+      }
+    }, { rootMargin: "600px" });
+    observer.observe(document.getElementById("sentinel"));
+
+    void loadNext();
+  </script>
+</body>
+</html>
+"##;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -934,6 +1276,7 @@ mod tests {
 
         assert!(html.contains("/v1/content/stats?site="));
         assert!(html.contains("/v1/rules?site="));
+        assert!(html.contains("/dashboard/posts"));
         assert!(html.contains("/dashboard/rules/"));
         assert!(html.contains("/v1/feedback?site="));
         assert!(html.contains("/v1/rule-proposals?site="));
@@ -951,5 +1294,14 @@ mod tests {
         assert!(html.contains("readableCapturedText"));
         assert!(html.contains("Captured text"));
         assert!(html.contains("Raw capture"));
+    }
+
+    #[tokio::test]
+    async fn posts_dashboard_page_links_content_surface() {
+        let Html(html) = posts_dashboard().await;
+
+        assert!(html.contains("/v1/content?site="));
+        assert!(html.contains("Stored Posts"));
+        assert!(html.contains("IntersectionObserver"));
     }
 }

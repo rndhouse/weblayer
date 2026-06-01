@@ -55,6 +55,7 @@ WEBLAYER_X_DEBUG_STATS=1 weblayer daemon
 
 - `GET /health`
 - `GET /dashboard`
+- `GET /dashboard/posts`
 - `GET /dashboard/rules/{id}`
 - `GET /v1/events`
 - `POST /v1/dom/analyze`
