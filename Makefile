@@ -35,6 +35,7 @@ check: $(DOCS_BOOTSTRAP)
 	cargo check --manifest-path $(CARGO_MANIFEST)
 	for file in $(SHARED_JS); do node --check "$$file"; done
 	$(MAKE) -C $(EXTENSION_DIR) test
+	node tests/dashboardRuleText.test.js
 	node -e "for (const file of ['$(EXTENSION_DIR)/chrome/manifest.json','$(EXTENSION_DIR)/firefox/manifest.json']) { JSON.parse(require('fs').readFileSync(file, 'utf8')); console.log(file + ' ok'); }"
 	$(MKDOCS) build --strict
 

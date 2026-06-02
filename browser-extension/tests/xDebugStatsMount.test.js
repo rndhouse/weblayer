@@ -237,6 +237,31 @@ function testXMetadataIncludesTweetBodyText() {
   );
 }
 
+function testXMetadataFallsBackToCleanStatusPageText() {
+  const root = new FakeElement("document");
+  const main = new FakeElement("main");
+  const article = new FakeElement("article", { "data-testid": "tweet" }, {
+    width: 500,
+    height: 160,
+    text: "The Bowie is America's knife.2:22 AM · Jun 2, 2026 · 232 Views"
+  });
+
+  main.append(article);
+  root.append(main);
+
+  const adapters = loadAdapters(root);
+  const context = adapters.current({ href: "https://x.com/bowie/status/24680" }, root);
+  const metadata = context.metadataForElement(article, {
+    text: "The Bowie is America's knife.2:22 AM · Jun 2, 2026 · 232 Views",
+    links: [{ href: "https://x.com/bowie/status/24680" }]
+  });
+
+  assert.strictEqual(
+    metadata.xCom.postText,
+    "The Bowie is America's knife."
+  );
+}
+
 function testBackgroundPreservesElementMetadata() {
   const background = loadBackground();
   const normalized = background.__normalizeElement({
@@ -258,5 +283,6 @@ function testBackgroundPreservesElementMetadata() {
 testXDebugStatsMountPrefersSidebarTimeline();
 testXDebugStatsMountFallsBackToVisibleSidebarChild();
 testXMetadataIncludesTweetBodyText();
+testXMetadataFallsBackToCleanStatusPageText();
 testBackgroundPreservesElementMetadata();
 console.log("x debug stats mount tests passed");

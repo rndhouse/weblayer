@@ -102,24 +102,67 @@
       pageKind === "statusThread" && visibleIndex === 0 ? pagePostId : null
     );
 
+    const authorHandle = authorHandleFromLinks(snapshot.links);
+
     return {
       xCom: {
         pageKind,
         postId: effectivePostId,
-        authorHandle: authorHandleFromLinks(snapshot.links),
-        postText: xComPostTextFromElement(element),
+        authorHandle,
+        postText: xComPostTextFromElement(element, snapshot, authorHandle),
         visibleIndex: visibleIndex >= 0 ? visibleIndex : null,
         replyingToHandles: replyingToHandlesFromText(snapshot.text)
       }
     };
   }
 
-  function xComPostTextFromElement(element) {
+  function xComPostTextFromElement(element, snapshot, authorHandle) {
     const textNode = Array.from(element.querySelectorAll("[data-testid='tweetText']"))
       .find((node) => node.closest(X_COM_POST_SELECTOR) === element);
     const text = textNode ? normalizeText(textNode.innerText || textNode.textContent || "") : "";
 
-    return text || null;
+    return text || xComPostTextFromSnapshot(snapshot && snapshot.text, authorHandle);
+  }
+
+  function xComPostTextFromSnapshot(text, authorHandle) {
+    let value = normalizeText(text).replace(/\s*·\s*/g, " · ");
+    if (!value) {
+      return null;
+    }
+
+    value = stripXStatusMetadataSuffix(value);
+
+    const handle = normalizeText(authorHandle).toLowerCase();
+    if (handle) {
+      const handleIndex = value.toLowerCase().indexOf(handle);
+      if (handleIndex >= 0 && handleIndex <= 80) {
+        value = value.slice(handleIndex + handle.length).trim();
+      }
+    }
+
+    value = value
+      .replace(/^(?:·\s*)?(?:(?:now|\d+[smhd])|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2})\s*/i, "")
+      .replace(/\s*·\s*/g, " · ")
+      .replace(/\s+(?:\d+(?:\.\d+)?[KMB]?){2,}$/i, "")
+      .replace(/([^\d\s])(?:\d+(?:\.\d+)?[KMB]?){2,}$/i, "$1")
+      .trim();
+
+    return value || null;
+  }
+
+  function stripXStatusMetadataSuffix(text) {
+    const month = "(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\\.?";
+    const date = `${month}\\s+\\d{1,2},\\s+\\d{4}`;
+    const time = "\\d{1,2}:\\d{2}\\s*(?:AM|PM)";
+    const views = "[\\d,.]+\\s*[KMB]?\\s+Views?";
+    const suffixes = [
+      new RegExp(`\\s*${time}\\s*·\\s*${date}\\s*·\\s*${views}$`, "i"),
+      new RegExp(`\\s*${date}\\s*·\\s*${views}$`, "i"),
+      new RegExp(`\\s*${time}\\s*·\\s*${date}$`, "i"),
+      new RegExp(`\\s*·\\s*${views}$`, "i")
+    ];
+
+    return suffixes.reduce((value, pattern) => value.replace(pattern, ""), text).trim();
   }
 
   function statusIdFromLinks(links) {
