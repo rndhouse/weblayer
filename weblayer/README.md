@@ -289,7 +289,9 @@ The response stores and returns a proposal with actions such as `createRule`,
 automatically; review them through `/dashboard/proposals/{id}` or
 `GET /v1/rule-proposals/{id}`. To manually accept or reject one, post
 `{"action":"apply"}` or `{"action":"dismiss"}` to
-`/v1/rule-proposals/{id}/decision?site=x.com`.
+`/v1/rule-proposals/{id}/decision?site=x.com`. Proposals that contain only
+`noChange` are stored as dismissed automatically so they do not enter the
+manual review queue.
 
 Content annotation request shape:
 

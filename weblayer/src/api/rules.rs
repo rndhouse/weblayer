@@ -23,6 +23,7 @@ const MAX_RULE_LIMIT: usize = 500;
 const AGENT_ACTIVE_RULE_LIMIT: usize = 20;
 const DEFAULT_RULE_PROPOSAL_FEEDBACK_LIMIT: usize = 10;
 const MAX_RULE_PROPOSAL_FEEDBACK_LIMIT: usize = 10;
+const AUTO_NO_CHANGE_PROPOSAL_SOURCE: &str = "daemon:auto-no-change";
 
 pub(super) async fn create_rule_set_proposal(
     State(state): State<AppState>,
@@ -122,7 +123,11 @@ pub(super) async fn generate_x_rule_set_proposal(
             .x_record_rule_curation_run(&proposal.id, total_encounters)?;
     }
 
-    Ok(proposal)
+    if rule_set_proposal_is_actionable(&proposal) {
+        Ok(proposal)
+    } else {
+        auto_dismiss_no_change_rule_set_proposal(state, proposal)
+    }
 }
 
 pub(super) async fn rule_set_proposals(
@@ -677,6 +682,26 @@ fn rule_set_proposal_decision(action: &str) -> Result<RuleSetProposalDecision, A
     }
 }
 
+fn rule_set_proposal_is_actionable(proposal: &RuleSetProposal) -> bool {
+    proposal
+        .changes
+        .iter()
+        .any(|change| change.action != RuleSetProposalAction::NoChange)
+}
+
+fn auto_dismiss_no_change_rule_set_proposal(
+    state: &AppState,
+    proposal: RuleSetProposal,
+) -> Result<RuleSetProposal, ApiError> {
+    let result = state.content_store.x_decide_rule_set_proposal(
+        &proposal.id,
+        RuleSetProposalDecision::Dismiss,
+        AUTO_NO_CHANGE_PROPOSAL_SOURCE,
+    )?;
+
+    Ok(result.map(|result| result.proposal).unwrap_or(proposal))
+}
+
 fn heuristic_changes_from_suggestions(
     suggestions: Vec<RuleSuggestion>,
     active_rules: &[ContentRule],
@@ -757,4 +782,46 @@ fn rule_covers_reason(rule: &ContentRule, reason: &str) -> bool {
         .split(|character: char| !character.is_ascii_alphanumeric())
         .filter(|term| term.len() >= 4)
         .all(|term| haystack.contains(term))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_change_rule_set_proposals_are_not_actionable() {
+        let proposal = proposal(vec![no_change("Nothing useful to change.")]);
+
+        assert!(!rule_set_proposal_is_actionable(&proposal));
+    }
+
+    #[test]
+    fn create_rule_set_proposals_are_actionable() {
+        let proposal = proposal(vec![RuleSetProposalChange {
+            action: RuleSetProposalAction::CreateRule,
+            rule_id: Some("x-test-rule".into()),
+            status: Some("draft".into()),
+            priority: Some(100),
+            title: Some("Test rule".into()),
+            instruction: Some("Hide test content.".into()),
+            rationale: "Feedback has a coherent theme.".into(),
+            evidence_storage_keys: Vec::new(),
+            examples: RuleExamples::default(),
+        }]);
+
+        assert!(rule_set_proposal_is_actionable(&proposal));
+    }
+
+    fn proposal(changes: Vec<RuleSetProposalChange>) -> RuleSetProposal {
+        RuleSetProposal {
+            id: "x-rule-proposal-test".into(),
+            site: "x.com".into(),
+            status: "pending".into(),
+            source: "test".into(),
+            created_at_unix_ms: 0,
+            feedback_count: 0,
+            active_rule_count: 0,
+            changes,
+        }
+    }
 }

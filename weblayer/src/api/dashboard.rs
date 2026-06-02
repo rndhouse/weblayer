@@ -284,7 +284,7 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
         </div>
         <div class="panel">
           <div class="panel-heading">
-            <h2>Recent Rule Proposals</h2>
+            <h2>Pending Rule Proposals</h2>
             <button id="reviewRules" class="action-button" type="button">Review Rule Set</button>
           </div>
           <div id="reviewRulesStatus" class="meta" aria-live="polite"></div>
@@ -393,6 +393,11 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
       return `${proposal.source || "proposal"}; ${changes} changes; ${proposal.feedbackCount || 0} feedback rows`;
     }
 
+    function proposalHasActionableChanges(proposal) {
+      const changes = Array.isArray(proposal.changes) ? proposal.changes : [];
+      return changes.some((change) => change.action !== "noChange");
+    }
+
     async function reviewRuleSet() {
       const button = document.getElementById("reviewRules");
       const status = document.getElementById("reviewRulesStatus");
@@ -405,7 +410,9 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
           { minFeedback: 1, feedbackLimit: 10 }
         );
         const proposal = response.proposal || {};
-        status.textContent = proposal.id ? `Created ${proposal.id}` : "Rule review complete";
+        status.textContent = proposalHasActionableChanges(proposal)
+          ? `Created ${proposal.id}`
+          : "No rule changes proposed.";
         await load();
       } catch (error) {
         status.textContent = error instanceof Error ? error.message : String(error);
@@ -420,8 +427,9 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
           json(`/v1/content/stats?site=${encodeURIComponent(SITE)}`),
           json(`/v1/feedback?site=${encodeURIComponent(SITE)}&active=true&limit=10`),
           json(`/v1/rules?site=${encodeURIComponent(SITE)}&status=active&limit=50`),
-          json(`/v1/rule-proposals?site=${encodeURIComponent(SITE)}&limit=5`)
+          json(`/v1/rule-proposals?site=${encodeURIComponent(SITE)}&status=pending&limit=5`)
         ]);
+        const pendingProposals = (proposals.items || []).filter(proposalHasActionableChanges);
 
         setText("uniquePosts", stats.stats && stats.stats.uniqueItems);
         setText("postEncounters", stats.stats && stats.stats.totalEncounters);
@@ -436,14 +444,14 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
         );
         renderList(
           "proposals",
-          proposals.items,
+          pendingProposals,
           (proposal) => item(
             proposal.id,
             proposalSummary(proposal),
             proposal.status,
             `/dashboard/proposals/${encodeURIComponent(proposal.id)}`
           ),
-          "No rule proposals."
+          "No pending rule changes."
         );
         document.getElementById("updated").textContent = `Updated ${new Date().toLocaleTimeString()}`;
       } catch (error) {
@@ -1358,6 +1366,11 @@ const PROPOSAL_DASHBOARD_HTML: &str = r##"<!doctype html>
       return parts.join("; ");
     }
 
+    function proposalHasActionableChanges(proposal) {
+      const changes = Array.isArray(proposal.changes) ? proposal.changes : [];
+      return changes.some((change) => change.action !== "noChange");
+    }
+
     function changeItem(change, index) {
       const body = document.createElement("div");
       const title = change.title || change.ruleId || `Change ${index + 1}`;
@@ -1395,12 +1408,13 @@ const PROPOSAL_DASHBOARD_HTML: &str = r##"<!doctype html>
     }
 
     function updateDecisionControls(proposal) {
-      const pending = proposal && proposal.status === "pending";
+      const actionable = proposal && proposalHasActionableChanges(proposal);
+      const pending = actionable && proposal.status === "pending";
       document.getElementById("applyProposal").disabled = !pending;
       document.getElementById("dismissProposal").disabled = !pending;
-      document.getElementById("decisionStatus").textContent = pending
-        ? "Pending manual decision."
-        : `Proposal is ${proposal ? proposal.status : "unavailable"}.`;
+      document.getElementById("decisionStatus").textContent = actionable
+        ? (pending ? "Pending manual decision." : `Proposal is ${proposal ? proposal.status : "unavailable"}.`)
+        : "No rule changes proposed; no decision needed.";
     }
 
     function renderProposal(proposal) {
@@ -1822,6 +1836,9 @@ mod tests {
         assert!(html.contains("/dashboard/proposals/"));
         assert!(html.contains("/v1/feedback?site="));
         assert!(html.contains("/v1/rule-proposals?site="));
+        assert!(html.contains("status=pending"));
+        assert!(html.contains("proposalHasActionableChanges"));
+        assert!(html.contains("No rule changes proposed."));
         assert!(html.contains("Review Rule Set"));
         assert!(html.contains("method: \"POST\""));
     }
@@ -1856,5 +1873,6 @@ mod tests {
         assert!(html.contains("Accept Proposal"));
         assert!(html.contains("Reject Proposal"));
         assert!(html.contains("Changed Rules"));
+        assert!(html.contains("No rule changes proposed; no decision needed."));
     }
 }
