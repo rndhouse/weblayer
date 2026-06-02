@@ -742,7 +742,7 @@ fn build_rule_set_proposal_prompt(
     let feedback_json = serde_json::to_string(feedback)?;
     let active_rules_json = serde_json::to_string(active_rules)?;
     Ok(format!(
-        "Create a reviewable rule-set proposal for WebLayer X filtering. Current active rules JSON: {active_rules_json}\nActive user feedback JSON: {feedback_json}\nReconcile the feedback with the current active rules. Active rule matchedCount and hideCount show how often each rule has matched and hidden content in final daemon decisions. Use the feedback-time rulesAtFeedback and matchedRuleIds to distinguish uncovered feedback from feedback that already had a rule in play. Avoid duplicate rules and avoid broad overlapping rules. Prefer updateRule when feedback is clearly evidence for an existing active rule. Use createRule only for a coherent uncovered theme, and set status to \"draft\". Use disableRule only when an active rule is redundant with another active rule or clearly obsolete. Use noChange when feedback is too sparse or already covered. For updateRule, include the existing ruleId and only fields that should change; include positive examples when feedback should become rule evidence. For disableRule, include the existing ruleId and status \"disabled\". Put feedback storage keys in evidenceStorageKeys. Keep rationales under 160 characters. Return only JSON matching the schema."
+        "Create an automatically applied rule-set curation plan for WebLayer X filtering. Current active rules JSON: {active_rules_json}\nActive user feedback JSON: {feedback_json}\nReconcile the feedback with the current active rules. Active rule matchedCount and hideCount show how often each rule has matched and hidden content in final daemon decisions. Use the feedback-time rulesAtFeedback and matchedRuleIds to distinguish uncovered feedback from feedback that already had a rule in play. Avoid duplicate rules and avoid broad overlapping rules. Prefer updateRule when feedback is clearly evidence for an existing active rule. Use createRule only for a coherent uncovered theme, and set status to \"active\". Use disableRule only when an active rule is redundant with another active rule or clearly obsolete. Use noChange when feedback is too sparse or already covered. For updateRule, include the existing ruleId and only fields that should change; include positive examples when feedback should become rule evidence. For disableRule, include the existing ruleId and status \"disabled\". Put feedback storage keys in evidenceStorageKeys. Keep rationales under 160 characters. Return only JSON matching the schema."
     ))
 }
 
@@ -1045,6 +1045,7 @@ mod tests {
         assert!(prompt.contains("hideCount"));
         assert!(prompt.contains("reply yes if you agree"));
         assert!(prompt.contains("Prefer updateRule"));
+        assert!(prompt.contains("set status to \"active\""));
     }
 
     #[test]

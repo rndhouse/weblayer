@@ -284,7 +284,7 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
         </div>
         <div class="panel">
           <div class="panel-heading">
-            <h2>Pending Rule Proposals</h2>
+            <h2>Recent Rule Reviews</h2>
             <button id="reviewRules" class="action-button" type="button">Review Rule Set</button>
           </div>
           <div id="reviewRulesStatus" class="meta" aria-live="polite"></div>
@@ -390,7 +390,7 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
 
     function proposalSummary(proposal) {
       const changes = Array.isArray(proposal.changes) ? proposal.changes.length : 0;
-      return `${proposal.source || "proposal"}; ${changes} changes; ${proposal.feedbackCount || 0} feedback rows`;
+      return `${proposal.status || "review"}; ${changes} changes; ${proposal.feedbackCount || 0} feedback rows`;
     }
 
     function proposalHasActionableChanges(proposal) {
@@ -410,8 +410,9 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
           { minFeedback: 1, feedbackLimit: 10 }
         );
         const proposal = response.proposal || {};
-        status.textContent = proposalHasActionableChanges(proposal)
-          ? `Created ${proposal.id}`
+        const changedRules = Array.isArray(response.changedRules) ? response.changedRules : [];
+        status.textContent = changedRules.length
+          ? `Applied ${changedRules.length} rule change${changedRules.length === 1 ? "" : "s"}.`
           : "No rule changes proposed.";
         await load();
       } catch (error) {
@@ -427,9 +428,9 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
           json(`/v1/content/stats?site=${encodeURIComponent(SITE)}`),
           json(`/v1/feedback?site=${encodeURIComponent(SITE)}&active=true&limit=10`),
           json(`/v1/rules?site=${encodeURIComponent(SITE)}&status=active&limit=50`),
-          json(`/v1/rule-proposals?site=${encodeURIComponent(SITE)}&status=pending&limit=5`)
+          json(`/v1/rule-proposals?site=${encodeURIComponent(SITE)}&limit=10`)
         ]);
-        const pendingProposals = (proposals.items || []).filter(proposalHasActionableChanges);
+        const recentRuleReviews = (proposals.items || []).filter(proposalHasActionableChanges);
 
         setText("uniquePosts", stats.stats && stats.stats.uniqueItems);
         setText("postEncounters", stats.stats && stats.stats.totalEncounters);
@@ -444,14 +445,14 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
         );
         renderList(
           "proposals",
-          pendingProposals,
+          recentRuleReviews,
           (proposal) => item(
             proposal.id,
             proposalSummary(proposal),
             proposal.status,
             `/dashboard/proposals/${encodeURIComponent(proposal.id)}`
           ),
-          "No pending rule changes."
+          "No recent rule changes."
         );
         document.getElementById("updated").textContent = `Updated ${new Date().toLocaleTimeString()}`;
       } catch (error) {
@@ -962,7 +963,7 @@ const PROPOSAL_DASHBOARD_HTML: &str = r##"<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>WebLayer Rule Proposal</title>
+  <title>WebLayer Rule Review</title>
   <style>
     :root {
       color-scheme: light dark;
@@ -1194,7 +1195,7 @@ const PROPOSAL_DASHBOARD_HTML: &str = r##"<!doctype html>
   <main>
     <header>
       <a href="/dashboard">Dashboard</a>
-      <h1 id="proposalTitle">Rule Proposal</h1>
+      <h1 id="proposalTitle">Rule Review</h1>
       <div id="proposalMeta" class="meta">Loading...</div>
     </header>
 
@@ -1208,19 +1209,15 @@ const PROPOSAL_DASHBOARD_HTML: &str = r##"<!doctype html>
     <section class="layout">
       <div>
         <div class="panel">
-          <h2>Proposed Changes</h2>
+          <h2>Rule Review Changes</h2>
           <div id="changes" class="list"></div>
         </div>
       </div>
 
       <div>
         <div class="panel">
-          <h2>Manual Decision</h2>
-          <div class="actions">
-            <button id="applyProposal" class="action-button" type="button">Accept Proposal</button>
-            <button id="dismissProposal" class="action-button reject-button" type="button">Reject Proposal</button>
-          </div>
-          <div id="decisionStatus" class="meta" aria-live="polite"></div>
+          <h2>Outcome</h2>
+          <div id="outcomeSummary" class="body">Loading...</div>
         </div>
         <div class="panel">
           <h2>Changed Rules</h2>
@@ -1234,36 +1231,11 @@ const PROPOSAL_DASHBOARD_HTML: &str = r##"<!doctype html>
     const SITE = "x.com";
     const parts = location.pathname.split("/").filter(Boolean);
     const proposalId = decodeURIComponent(parts[parts.length - 1] || "");
-    let currentProposal = null;
 
     async function json(path) {
       const response = await fetch(path, { headers: { "Accept": "application/json" } });
       if (!response.ok) {
         throw new Error(`${path} returned HTTP ${response.status}`);
-      }
-      return response.json();
-    }
-
-    async function postJson(path, body) {
-      const response = await fetch(path, {
-        method: "POST",
-        headers: {
-          "Accept": "application/json",
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(body)
-      });
-      if (!response.ok) {
-        const fallback = `${path} returned HTTP ${response.status}`;
-        try {
-          const value = await response.json();
-          throw new Error(value.error || fallback);
-        } catch (error) {
-          if (error instanceof SyntaxError) {
-            throw new Error(fallback);
-          }
-          throw error;
-        }
       }
       return response.json();
     }
@@ -1394,33 +1366,45 @@ const PROPOSAL_DASHBOARD_HTML: &str = r##"<!doctype html>
       return item(title, body, change.action || "change");
     }
 
-    function changedRuleItem(rule) {
+    function changedRuleItem(change) {
       const body = document.createElement("div");
+      const ruleId = change.ruleId;
       const row = line("Rule ID", "");
-      row.querySelector(".line").replaceChildren(ruleLink(rule.id));
+      if (ruleId) {
+        row.querySelector(".line").replaceChildren(ruleLink(ruleId));
+      }
       body.append(
         row,
-        line("Status", rule.status),
-        line("Priority", rule.priority),
-        line("Instruction", rule.instruction)
+        line("Status", change.status),
+        line("Priority", change.priority),
+        line("Instruction", change.instruction),
+        line("Rationale", change.rationale)
       );
-      return item(rule.title || rule.id, body, rule.status);
+      return item(change.title || ruleId, body, change.action);
     }
 
-    function updateDecisionControls(proposal) {
-      const actionable = proposal && proposalHasActionableChanges(proposal);
-      const pending = actionable && proposal.status === "pending";
-      document.getElementById("applyProposal").disabled = !pending;
-      document.getElementById("dismissProposal").disabled = !pending;
-      document.getElementById("decisionStatus").textContent = actionable
-        ? (pending ? "Pending manual decision." : `Proposal is ${proposal ? proposal.status : "unavailable"}.`)
-        : "No rule changes proposed; no decision needed.";
+    function outcomeText(proposal) {
+      if (!proposal) {
+        return "Review unavailable.";
+      }
+      if (!proposalHasActionableChanges(proposal)) {
+        return proposal.status === "dismissed"
+          ? "No rule changes were necessary."
+          : `No rule changes were proposed; status is ${proposal.status || "unknown"}.`;
+      }
+      if (proposal.status === "applied") {
+        return "Rule changes were applied automatically by curation.";
+      }
+      if (proposal.status === "pending") {
+        return "Rule changes are pending automatic processing.";
+      }
+      return `Rule review status is ${proposal.status || "unknown"}.`;
     }
 
     function renderProposal(proposal) {
-      currentProposal = proposal;
       const changes = Array.isArray(proposal.changes) ? proposal.changes : [];
-      document.title = `${proposal.id || proposalId} - WebLayer Proposal`;
+      const changedRules = changes.filter((change) => change.action !== "noChange");
+      document.title = `${proposal.id || proposalId} - WebLayer Review`;
       setText("proposalTitle", proposal.id || proposalId);
       setText(
         "proposalMeta",
@@ -1431,37 +1415,8 @@ const PROPOSAL_DASHBOARD_HTML: &str = r##"<!doctype html>
       setText("activeRuleCount", proposal.activeRuleCount);
       setText("changeCount", changes.length);
       renderList("changes", changes, changeItem, "No proposed changes.");
-      updateDecisionControls(proposal);
-    }
-
-    async function decide(action) {
-      if (!currentProposal || currentProposal.status !== "pending") {
-        return;
-      }
-
-      const applyButton = document.getElementById("applyProposal");
-      const dismissButton = document.getElementById("dismissProposal");
-      applyButton.disabled = true;
-      dismissButton.disabled = true;
-      setText("decisionStatus", action === "apply" ? "Applying proposal..." : "Rejecting proposal...");
-
-      try {
-        const response = await postJson(
-          `/v1/rule-proposals/${encodeURIComponent(proposalId)}/decision?site=${encodeURIComponent(SITE)}`,
-          { action, source: "dashboard" }
-        );
-        renderProposal(response.proposal || {});
-        renderList(
-          "changedRules",
-          response.changedRules,
-          changedRuleItem,
-          action === "apply" ? "No rules changed." : "Proposal rejected without changing rules."
-        );
-        setText("decisionStatus", action === "apply" ? "Proposal accepted." : "Proposal rejected.");
-      } catch (error) {
-        document.getElementById("changedRules").replaceChildren(errorNode(error));
-        updateDecisionControls(currentProposal);
-      }
+      setText("outcomeSummary", outcomeText(proposal));
+      renderList("changedRules", changedRules, changedRuleItem, "No rule changes were applied.");
     }
 
     async function load() {
@@ -1474,20 +1429,12 @@ const PROPOSAL_DASHBOARD_HTML: &str = r##"<!doctype html>
           `/v1/rule-proposals/${encodeURIComponent(proposalId)}?site=${encodeURIComponent(SITE)}`
         );
         renderProposal(detail.proposal || {});
-        renderList("changedRules", [], changedRuleItem, "No decision made from this page.");
       } catch (error) {
         document.getElementById("changes").replaceChildren(errorNode(error));
         document.getElementById("changedRules").replaceChildren(errorNode(error));
         setText("proposalMeta", "Load failed");
       }
     }
-
-    document.getElementById("applyProposal").addEventListener("click", () => {
-      void decide("apply");
-    });
-    document.getElementById("dismissProposal").addEventListener("click", () => {
-      void decide("dismiss");
-    });
 
     void load();
   </script>
@@ -1836,8 +1783,9 @@ mod tests {
         assert!(html.contains("/dashboard/proposals/"));
         assert!(html.contains("/v1/feedback?site="));
         assert!(html.contains("/v1/rule-proposals?site="));
-        assert!(html.contains("status=pending"));
+        assert!(html.contains("Recent Rule Reviews"));
         assert!(html.contains("proposalHasActionableChanges"));
+        assert!(html.contains("Applied ${changedRules.length} rule change"));
         assert!(html.contains("No rule changes proposed."));
         assert!(html.contains("Review Rule Set"));
         assert!(html.contains("method: \"POST\""));
@@ -1869,10 +1817,10 @@ mod tests {
         let Html(html) = proposal_dashboard().await;
 
         assert!(html.contains("/v1/rule-proposals/${encodeURIComponent(proposalId)}?site="));
-        assert!(html.contains("/decision?site="));
-        assert!(html.contains("Accept Proposal"));
-        assert!(html.contains("Reject Proposal"));
+        assert!(html.contains("Outcome"));
         assert!(html.contains("Changed Rules"));
-        assert!(html.contains("No rule changes proposed; no decision needed."));
+        assert!(html.contains("Rule changes were applied automatically by curation."));
+        assert!(!html.contains("Accept Proposal"));
+        assert!(!html.contains("Reject Proposal"));
     }
 }

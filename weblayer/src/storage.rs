@@ -696,7 +696,7 @@ pub struct RuleSetProposalChange {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum RuleSetProposalAction {
-    /// Create a new draft rule.
+    /// Create a new rule.
     CreateRule,
     /// Update an existing rule.
     UpdateRule,

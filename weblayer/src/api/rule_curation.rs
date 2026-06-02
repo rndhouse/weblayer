@@ -28,14 +28,16 @@ async fn run_x_rule_curation_if_due(state: AppState) {
             return;
         }
 
-        match rules::generate_x_rule_set_proposal(&state, 1, FEEDBACK_BATCH_LIMIT).await {
-            Ok(proposal) => {
+        match rules::curate_x_rule_set(&state, 1, FEEDBACK_BATCH_LIMIT).await {
+            Ok(result) => {
                 debug!(
-                    proposal_id = proposal.id.as_str(),
-                    source = proposal.source.as_str(),
-                    feedback_count = proposal.feedback_count,
-                    active_rule_count = proposal.active_rule_count,
-                    "generated automatic X rule-set proposal"
+                    proposal_id = result.proposal.id.as_str(),
+                    status = result.proposal.status.as_str(),
+                    source = result.proposal.source.as_str(),
+                    feedback_count = result.proposal.feedback_count,
+                    active_rule_count = result.proposal.active_rule_count,
+                    changed_rule_count = result.changed_rules.len(),
+                    "completed automatic X rule curation"
                 );
             }
             Err(error) => {

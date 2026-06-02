@@ -7,8 +7,9 @@ use super::{
 use crate::storage::{
     ContentRule, RuleAuditEvent, RuleCatch, RuleCatchQuery, RuleCreateInput, RuleExamples,
     RuleQuery, RuleSetProposal, RuleSetProposalAction, RuleSetProposalChange,
-    RuleSetProposalCreateInput, RuleSetProposalDecision, RuleSetProposalQuery, RuleStatusInput,
-    RuleSuggestion, RuleSuggestionQuery, RuleUpdateInput, RuleValidationMatch, XDislikeQuery,
+    RuleSetProposalCreateInput, RuleSetProposalDecision, RuleSetProposalDecisionResult,
+    RuleSetProposalQuery, RuleStatusInput, RuleSuggestion, RuleSuggestionQuery, RuleUpdateInput,
+    RuleValidationMatch, XDislikeQuery,
 };
 use axum::{
     extract::{Path as AxumPath, Query, State},
@@ -23,6 +24,7 @@ const MAX_RULE_LIMIT: usize = 500;
 const AGENT_ACTIVE_RULE_LIMIT: usize = 20;
 const DEFAULT_RULE_PROPOSAL_FEEDBACK_LIMIT: usize = 10;
 const MAX_RULE_PROPOSAL_FEEDBACK_LIMIT: usize = 10;
+const AUTO_APPLY_PROPOSAL_SOURCE: &str = "daemon:auto-rule-curation";
 const AUTO_NO_CHANGE_PROPOSAL_SOURCE: &str = "daemon:auto-no-change";
 
 pub(super) async fn create_rule_set_proposal(
@@ -36,23 +38,22 @@ pub(super) async fn create_rule_set_proposal(
         .feedback_limit
         .unwrap_or(DEFAULT_RULE_PROPOSAL_FEEDBACK_LIMIT)
         .min(MAX_RULE_PROPOSAL_FEEDBACK_LIMIT);
-    let proposal = match site {
-        SiteScope::XCom => {
-            generate_x_rule_set_proposal(&state, min_feedback, feedback_limit).await?
-        }
+    let result = match site {
+        SiteScope::XCom => curate_x_rule_set(&state, min_feedback, feedback_limit).await?,
     };
 
     Ok(Json(RuleSetProposalMutationResponse {
         site: site.as_str(),
-        proposal,
+        proposal: result.proposal,
+        changed_rules: result.changed_rules,
     }))
 }
 
-pub(super) async fn generate_x_rule_set_proposal(
+pub(super) async fn curate_x_rule_set(
     state: &AppState,
     min_feedback: usize,
     feedback_limit: usize,
-) -> Result<RuleSetProposal, ApiError> {
+) -> Result<RuleSetProposalDecisionResult, ApiError> {
     let min_feedback = min_feedback.max(1);
     let feedback_limit = feedback_limit.min(MAX_RULE_PROPOSAL_FEEDBACK_LIMIT);
     let feedback = state
@@ -109,6 +110,13 @@ pub(super) async fn generate_x_rule_set_proposal(
             active_rule_count: active_rules.len(),
             changes,
         })?;
+
+    let result = if rule_set_proposal_is_actionable(&proposal) {
+        auto_apply_rule_set_proposal(state, proposal)?
+    } else {
+        auto_dismiss_no_change_rule_set_proposal(state, proposal)?
+    };
+
     if feedback.len() >= min_feedback {
         let feedback_storage_keys = feedback
             .iter()
@@ -116,18 +124,14 @@ pub(super) async fn generate_x_rule_set_proposal(
             .collect::<Vec<_>>();
         state
             .content_store
-            .x_mark_feedback_considered_by_proposal(&feedback_storage_keys, &proposal.id)?;
+            .x_mark_feedback_considered_by_proposal(&feedback_storage_keys, &result.proposal.id)?;
         let total_encounters = state.content_store.x_content_stats()?.total_encounters;
         state
             .content_store
-            .x_record_rule_curation_run(&proposal.id, total_encounters)?;
+            .x_record_rule_curation_run(&result.proposal.id, total_encounters)?;
     }
 
-    if rule_set_proposal_is_actionable(&proposal) {
-        Ok(proposal)
-    } else {
-        auto_dismiss_no_change_rule_set_proposal(state, proposal)
-    }
+    Ok(result)
 }
 
 pub(super) async fn rule_set_proposals(
@@ -606,6 +610,7 @@ pub(super) struct RuleMutationResponse {
 pub(super) struct RuleSetProposalMutationResponse {
     site: &'static str,
     proposal: RuleSetProposal,
+    changed_rules: Vec<ContentRule>,
 }
 
 #[derive(Debug, Serialize)]
@@ -689,17 +694,36 @@ fn rule_set_proposal_is_actionable(proposal: &RuleSetProposal) -> bool {
         .any(|change| change.action != RuleSetProposalAction::NoChange)
 }
 
+fn auto_apply_rule_set_proposal(
+    state: &AppState,
+    proposal: RuleSetProposal,
+) -> Result<RuleSetProposalDecisionResult, ApiError> {
+    let result = state.content_store.x_decide_rule_set_proposal(
+        &proposal.id,
+        RuleSetProposalDecision::Apply,
+        AUTO_APPLY_PROPOSAL_SOURCE,
+    )?;
+
+    Ok(result.unwrap_or(RuleSetProposalDecisionResult {
+        proposal,
+        changed_rules: Vec::new(),
+    }))
+}
+
 fn auto_dismiss_no_change_rule_set_proposal(
     state: &AppState,
     proposal: RuleSetProposal,
-) -> Result<RuleSetProposal, ApiError> {
+) -> Result<RuleSetProposalDecisionResult, ApiError> {
     let result = state.content_store.x_decide_rule_set_proposal(
         &proposal.id,
         RuleSetProposalDecision::Dismiss,
         AUTO_NO_CHANGE_PROPOSAL_SOURCE,
     )?;
 
-    Ok(result.map(|result| result.proposal).unwrap_or(proposal))
+    Ok(result.unwrap_or(RuleSetProposalDecisionResult {
+        proposal,
+        changed_rules: Vec::new(),
+    }))
 }
 
 fn heuristic_changes_from_suggestions(
@@ -736,7 +760,7 @@ fn heuristic_changes_from_suggestions(
                 RuleSetProposalChange {
                     action: RuleSetProposalAction::CreateRule,
                     rule_id: Some(suggestion.id),
-                    status: Some("draft".into()),
+                    status: Some("active".into()),
                     priority: Some(suggestion.priority),
                     title: Some(suggestion.title),
                     instruction: Some(suggestion.instruction),
@@ -800,7 +824,7 @@ mod tests {
         let proposal = proposal(vec![RuleSetProposalChange {
             action: RuleSetProposalAction::CreateRule,
             rule_id: Some("x-test-rule".into()),
-            status: Some("draft".into()),
+            status: Some("active".into()),
             priority: Some(100),
             title: Some("Test rule".into()),
             instruction: Some("Hide test content.".into()),

@@ -225,12 +225,12 @@ only `active` rules are sent to the AI analyzer. Rule status values are
 `draft`, `active`, `disabled`, and `archived`.
 `/v1/rules/{id}/catches` lists recent hidden posts where that rule matched the
 final decision, which powers rule evidence in the dashboard.
-`/v1/rule-proposals` generates and stores reviewable rule-set change proposals
-from active feedback. Proposal generation sends active feedback, current active
-rules, feedback-time rule snapshots, and simple per-rule match/hide counts to
-the Codex app agent when available. If the agent is unavailable, the daemon
-stores a heuristic proposal derived from feedback reasons so the review
-pipeline remains testable.
+`/v1/rule-proposals` runs rule-set curation from active feedback and stores the
+result as an audit record. Curation sends active feedback, current active rules,
+feedback-time rule snapshots, and simple per-rule match/hide counts to the
+Codex app agent when available. Actionable changes are applied automatically.
+If the agent is unavailable, the daemon applies a heuristic curation result
+derived from feedback reasons so the pipeline remains testable.
 
 Rule create request shape:
 
@@ -270,7 +270,7 @@ GET /v1/rule-suggestions?site=x.com&minFeedback=2&limit=20
 Suggestions are not stored and are never active automatically. Use their title,
 instruction, and examples to create an explicit draft rule after review.
 
-Rule proposals derive reviewable rule-set changes from active feedback:
+Rule proposals run automatic rule-set curation from active feedback:
 
 ```http
 POST /v1/rule-proposals?site=x.com
@@ -284,14 +284,12 @@ Content-Type: application/json
 }
 ```
 
-The response stores and returns a proposal with actions such as `createRule`,
-`updateRule`, `disableRule`, or `noChange`. Proposals are not applied
-automatically; review them through `/dashboard/proposals/{id}` or
-`GET /v1/rule-proposals/{id}`. To manually accept or reject one, post
-`{"action":"apply"}` or `{"action":"dismiss"}` to
-`/v1/rule-proposals/{id}/decision?site=x.com`. Proposals that contain only
-`noChange` are stored as dismissed automatically so they do not enter the
-manual review queue.
+The response stores and returns the curation record with actions such as
+`createRule`, `updateRule`, `disableRule`, or `noChange`, plus `changedRules`
+for rules changed by that run. Actionable records are applied automatically and
+stored with status `applied`; records that contain only `noChange` are stored
+with status `dismissed`. Review the result after the fact through
+`/dashboard/proposals/{id}` or `GET /v1/rule-proposals/{id}`.
 
 Content annotation request shape:
 
