@@ -201,6 +201,28 @@ fn uses_x_post_text_metadata_instead_of_full_article_chrome() {
 }
 
 #[test]
+fn does_not_use_full_article_chrome_as_post_text() {
+    let element = element(
+        "client-1",
+        "The Bowie is America's knife.2:22 AM · Jun 2, 2026 · 232 Views",
+        Some("https://x.com/bowie/status/24680"),
+    );
+
+    let extracted = extract_items(&batch(vec![element]));
+
+    assert_eq!(extracted.len(), 1);
+    assert_eq!(extracted[0].item.text, "");
+    assert_eq!(
+        extracted[0]
+            .item
+            .metadata
+            .pointer("/xCom/snapshotText")
+            .and_then(serde_json::Value::as_str),
+        Some("The Bowie is America's knife.2:22 AM · Jun 2, 2026 · 232 Views")
+    );
+}
+
+#[test]
 fn ignores_x_dom_regions_without_status_identity() {
     let batch = batch(vec![element("client-1", "navigation", None)]);
 

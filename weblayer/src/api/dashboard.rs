@@ -840,80 +840,10 @@ const RULE_DASHBOARD_HTML: &str = r##"<!doctype html>
         return { value: "", changed: false };
       }
 
-      let value = compact.replace(/\s*·\s*/g, " · ");
-      value = stripXStatusMetadataSuffix(value);
-      let strippedChrome = false;
-      const authorText = String(author || "").trim().toLowerCase();
-      if (authorText) {
-        const authorIndex = value.toLowerCase().indexOf(authorText);
-        if (authorIndex >= 0 && authorIndex <= 80) {
-          value = value.slice(authorIndex + authorText.length).trim();
-          strippedChrome = true;
-        }
-      }
-      if (strippedChrome) {
-        value = value.replace(
-          /^(?:·\s*)?(?:(?:now|\d+[smhd])|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2})\s*/i,
-          ""
-        ).trim();
-      }
-
-      value = value
-        .replace(/\s*·\s*/g, " · ")
-        .replace(xStatusMetadataSuffixPattern(), "")
-        .replace(xStatusDateViewsSuffixPattern(), "")
-        .replace(xStatusTimeDateSuffixPattern(), "")
-        .replace(xStatusViewsSuffixPattern(), "")
-        .replace(/\s+(?:\d+(?:\.\d+)?[KMB]?){2,}$/i, "")
-        .replace(/([^\d\s])(?:\d+(?:\.\d+)?[KMB]?){2,}$/i, "$1")
-        .replace(/\s+/g, " ")
-        .trim();
-
       return {
-        value: value || compact,
-        changed: value.length > 0 && value !== compact
+        value: compact,
+        changed: false
       };
-    }
-
-    function stripXStatusMetadataSuffix(text) {
-      return text
-        .replace(xStatusMetadataSuffixPattern(), "")
-        .replace(xStatusDateViewsSuffixPattern(), "")
-        .replace(xStatusTimeDateSuffixPattern(), "")
-        .replace(xStatusViewsSuffixPattern(), "")
-        .trim();
-    }
-
-    function xStatusMonthPattern() {
-      return "(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\\.?";
-    }
-
-    function xStatusDatePattern() {
-      return `${xStatusMonthPattern()}\\s+\\d{1,2},\\s+\\d{4}`;
-    }
-
-    function xStatusTimePattern() {
-      return "\\d{1,2}:\\d{2}\\s*(?:AM|PM)";
-    }
-
-    function xStatusViewsPattern() {
-      return "[\\d,.]+\\s*[KMB]?\\s+Views?";
-    }
-
-    function xStatusMetadataSuffixPattern() {
-      return new RegExp(`\\s*${xStatusTimePattern()}\\s*·\\s*${xStatusDatePattern()}\\s*·\\s*${xStatusViewsPattern()}$`, "i");
-    }
-
-    function xStatusDateViewsSuffixPattern() {
-      return new RegExp(`\\s*${xStatusDatePattern()}\\s*·\\s*${xStatusViewsPattern()}$`, "i");
-    }
-
-    function xStatusTimeDateSuffixPattern() {
-      return new RegExp(`\\s*${xStatusTimePattern()}\\s*·\\s*${xStatusDatePattern()}$`, "i");
-    }
-
-    function xStatusViewsSuffixPattern() {
-      return new RegExp(`\\s*·\\s*${xStatusViewsPattern()}$`, "i");
     }
 
     function catchItem(entry) {

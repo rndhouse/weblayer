@@ -64,7 +64,7 @@ fn extract_item(
         content_id: Some(post_id.clone()),
         url: status_href,
         author,
-        text: post_text.clone().unwrap_or_else(|| element.text.clone()),
+        text: post_text.clone().unwrap_or_default(),
         captured_at: element
             .captured_at
             .clone()

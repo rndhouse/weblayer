@@ -237,7 +237,7 @@ function testXMetadataIncludesTweetBodyText() {
   );
 }
 
-function testXMetadataFallsBackToCleanStatusPageText() {
+function testXMetadataDoesNotUseArticleTextAsPostBody() {
   const root = new FakeElement("document");
   const main = new FakeElement("main");
   const article = new FakeElement("article", { "data-testid": "tweet" }, {
@@ -256,10 +256,7 @@ function testXMetadataFallsBackToCleanStatusPageText() {
     links: [{ href: "https://x.com/bowie/status/24680" }]
   });
 
-  assert.strictEqual(
-    metadata.xCom.postText,
-    "The Bowie is America's knife."
-  );
+  assert.strictEqual(metadata.xCom.postText, null);
 }
 
 function testBackgroundPreservesElementMetadata() {
@@ -283,6 +280,6 @@ function testBackgroundPreservesElementMetadata() {
 testXDebugStatsMountPrefersSidebarTimeline();
 testXDebugStatsMountFallsBackToVisibleSidebarChild();
 testXMetadataIncludesTweetBodyText();
-testXMetadataFallsBackToCleanStatusPageText();
+testXMetadataDoesNotUseArticleTextAsPostBody();
 testBackgroundPreservesElementMetadata();
 console.log("x debug stats mount tests passed");
