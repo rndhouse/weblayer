@@ -45,22 +45,20 @@ Incoming posts are not logged by default. To enable captured-content log events:
 WEBLAYER_LOG_CAPTURED_CONTENT=1 weblayer daemon
 ```
 
-Enable an X.com page overlay with daemon-side debug counters:
-
-```sh
-WEBLAYER_X_DEBUG_STATS=1 weblayer daemon
-```
+X.com pages receive a sidebar stats panel by default. The panel links to the
+local `/x.com/dashboard` page.
 
 ## Endpoints
 
 - `GET /health`
-- `GET /dashboard`
-- `GET /dashboard/posts`
-- `GET /dashboard/proposals/{id}`
-- `GET /dashboard/rules/{id}`
+- `GET /x.com/dashboard`
+- `GET /x.com/dashboard/posts`
+- `GET /x.com/dashboard/proposals/{id}`
+- `GET /x.com/dashboard/rules/{id}`
 - `GET /v1/events`
 - `POST /v1/dom/analyze`
 - `POST /v1/dom/feedback`
+- `POST /v1/dom/exposures`
 - `GET /v1/content?site=x.com&q=codex`
 - `GET /v1/content/annotations?site=x.com&storageKey=x:id:123`
 - `POST /v1/content/annotations?site=x.com`

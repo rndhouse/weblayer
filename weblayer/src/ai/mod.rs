@@ -6,11 +6,12 @@ use crate::{
     storage::{ContentRule, RuleDecisionStats, RuleSetProposalChange, XDislikedPost},
 };
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
     time::Instant,
 };
 use summary_cache::SummaryCache;
+use tokio::sync::{watch, Mutex as AsyncMutex};
 use tracing::{debug, warn, Level};
 
 const CODEX_ENABLED_ENV: &str = "WEBLAYER_CODEX_APP_ENABLED";
@@ -20,6 +21,7 @@ const CODEX_ENABLED_ENV: &str = "WEBLAYER_CODEX_APP_ENABLED";
 pub struct AiAnalyzer {
     codex_app: Option<Arc<codex_app::CodexAppAnalyzer>>,
     x_summary_cache: Arc<Mutex<SummaryCache>>,
+    x_inflight_opinions: Arc<AsyncMutex<HashMap<String, watch::Sender<bool>>>>,
 }
 
 impl AiAnalyzer {
@@ -31,6 +33,7 @@ impl AiAnalyzer {
         Self {
             codex_app,
             x_summary_cache: Arc::new(Mutex::new(SummaryCache::from_env())),
+            x_inflight_opinions: Arc::new(AsyncMutex::new(HashMap::new())),
         }
     }
 
@@ -68,38 +71,140 @@ impl AiAnalyzer {
             return (!opinions.is_empty()).then_some(opinions);
         };
 
-        for item in &misses {
+        let prepared_misses = self.prepare_x_opinion_misses(&misses, &rule_scope).await;
+
+        for item in &prepared_misses.fresh_items {
             debug_x_agent_query_item(item);
         }
 
-        match codex_app.x_opinions(&misses, rules).await {
-            Ok(fresh_opinions) => {
-                let misses_by_client_id: HashMap<_, _> = misses
-                    .iter()
-                    .map(|item| (item.client_id.as_str(), item))
-                    .collect();
-                let now = Instant::now();
+        let mut uncacheable_opinions = Vec::new();
+        if !prepared_misses.fresh_items.is_empty() {
+            match codex_app
+                .x_opinions(&prepared_misses.fresh_items, rules)
+                .await
+            {
+                Ok(fresh_opinions) => {
+                    let fresh_items_by_client_id: HashMap<_, _> = prepared_misses
+                        .fresh_items
+                        .iter()
+                        .map(|item| (item.client_id.as_str(), item))
+                        .collect();
+                    let now = Instant::now();
 
-                {
-                    let mut cache = self
-                        .x_summary_cache
-                        .lock()
-                        .expect("X summary cache mutex should not be poisoned");
+                    {
+                        let mut cache = self
+                            .x_summary_cache
+                            .lock()
+                            .expect("X summary cache mutex should not be poisoned");
 
-                    for opinion in &fresh_opinions {
-                        if let Some(item) = misses_by_client_id.get(opinion.client_id.as_str()) {
-                            cache.insert(item, &rule_scope, opinion, now);
+                        for opinion in &fresh_opinions {
+                            if let Some(item) =
+                                fresh_items_by_client_id.get(opinion.client_id.as_str())
+                            {
+                                if SummaryCache::cache_key_for_item(item, &rule_scope).is_some() {
+                                    cache.insert(item, &rule_scope, opinion, now);
+                                } else {
+                                    uncacheable_opinions.push(opinion.clone());
+                                }
+                            }
                         }
                     }
                 }
+                Err(error) => {
+                    warn!(%error, "codex app-server opinion unavailable");
+                }
+            }
+        }
 
-                opinions.extend(fresh_opinions);
-                Some(opinions)
+        self.complete_x_opinion_misses(&prepared_misses.leader_cache_keys)
+            .await;
+
+        for mut waiter in prepared_misses.waiters {
+            if !*waiter.borrow() {
+                let _ = waiter.changed().await;
             }
-            Err(error) => {
-                warn!(%error, "codex app-server opinion unavailable");
-                (!opinions.is_empty()).then_some(opinions)
+        }
+
+        {
+            let now = Instant::now();
+            let mut cache = self
+                .x_summary_cache
+                .lock()
+                .expect("X summary cache mutex should not be poisoned");
+
+            for item in misses
+                .iter()
+                .filter(|item| SummaryCache::cache_key_for_item(item, &rule_scope).is_some())
+            {
+                if let Some(hit) = cache.get(item, &rule_scope, now) {
+                    opinions.push(hit);
+                }
             }
+        }
+
+        opinions.extend(uncacheable_opinions);
+        (!opinions.is_empty()).then_some(opinions)
+    }
+
+    async fn prepare_x_opinion_misses(
+        &self,
+        misses: &[ContentItem],
+        rule_scope: &str,
+    ) -> PreparedOpinionMisses {
+        let mut fresh_items = Vec::new();
+        let mut leader_cache_keys = Vec::new();
+        let mut waiters = Vec::new();
+        let mut local_cache_keys = HashSet::new();
+        let mut inflight = self.x_inflight_opinions.lock().await;
+
+        for item in misses {
+            let Some(cache_key) = SummaryCache::cache_key_for_item(item, rule_scope) else {
+                fresh_items.push(item.clone());
+                continue;
+            };
+
+            if !local_cache_keys.insert(cache_key.clone()) {
+                if let Some(waiter) = inflight.get(cache_key.as_str()) {
+                    waiters.push(waiter.subscribe());
+                }
+                continue;
+            }
+
+            if let Some(waiter) = inflight.get(cache_key.as_str()) {
+                waiters.push(waiter.subscribe());
+                continue;
+            }
+
+            let (sender, _receiver) = watch::channel(false);
+            inflight.insert(cache_key.clone(), sender);
+            leader_cache_keys.push(cache_key);
+            fresh_items.push(item.clone());
+        }
+
+        PreparedOpinionMisses {
+            fresh_items,
+            leader_cache_keys,
+            waiters,
+        }
+    }
+
+    async fn complete_x_opinion_misses(&self, leader_cache_keys: &[String]) {
+        if leader_cache_keys.is_empty() {
+            return;
+        }
+
+        let mut waiters = Vec::new();
+        {
+            let mut inflight = self.x_inflight_opinions.lock().await;
+            for cache_key in leader_cache_keys {
+                if let Some(waiter) = inflight.remove(cache_key) {
+                    waiters.push(waiter);
+                }
+            }
+        }
+
+        for waiter in waiters {
+            let _ = waiter.send(true);
         }
     }
 
@@ -170,8 +275,15 @@ impl AiAnalyzer {
         Self {
             codex_app: None,
             x_summary_cache: Arc::new(Mutex::new(cache)),
+            x_inflight_opinions: Arc::new(AsyncMutex::new(HashMap::new())),
         }
     }
+}
+
+struct PreparedOpinionMisses {
+    fresh_items: Vec<ContentItem>,
+    leader_cache_keys: Vec<String>,
+    waiters: Vec<watch::Receiver<bool>>,
 }
 
 fn debug_x_agent_query_item(item: &ContentItem) {
@@ -179,16 +291,14 @@ fn debug_x_agent_query_item(item: &ContentItem) {
         return;
     }
 
-    if let Ok(post_json) = serde_json::to_string(item) {
-        debug!(
-            target: "weblayer_daemon::ai",
-            client_id = item.client_id.as_str(),
-            content_id = item.content_id.as_deref(),
-            url = item.url.as_deref(),
-            post = %post_json,
-            "querying Codex app-server for X post"
-        );
-    }
+    debug!(
+        target: "weblayer_daemon::ai",
+        post_url = item.url.as_deref(),
+        client_id = item.client_id.as_str(),
+        content_id = item.content_id.as_deref(),
+        author = item.author.as_deref(),
+        "querying Codex app-server for X post"
+    );
 }
 
 fn env_flag_default(name: &str, default: bool) -> bool {
@@ -293,4 +403,90 @@ fn stable_hash(text: &str) -> u64 {
     }
 
     hash
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::Value;
+    use tokio::time::{timeout, Duration};
+
+    fn item(client_id: &str, content_id: &str) -> ContentItem {
+        ContentItem {
+            client_id: client_id.into(),
+            content_id: Some(content_id.into()),
+            url: Some(format!("https://x.com/user/status/{content_id}")),
+            author: Some("@user".into()),
+            text: "post text".into(),
+            captured_at: None,
+            kind: Some("post".into()),
+            metadata: Value::Null,
+        }
+    }
+
+    #[tokio::test]
+    async fn opinion_misses_dedupe_duplicate_posts_in_one_batch() {
+        let analyzer = AiAnalyzer::for_tests_with_x_summaries(&[]);
+        let rule_scope = rule_cache_scope(&[]);
+        let misses = vec![item("first-client", "123"), item("second-client", "123")];
+
+        let prepared = analyzer
+            .prepare_x_opinion_misses(&misses, &rule_scope)
+            .await;
+
+        assert_eq!(prepared.fresh_items.len(), 1);
+        assert_eq!(prepared.fresh_items[0].client_id, "first-client");
+        assert_eq!(prepared.leader_cache_keys.len(), 1);
+        assert_eq!(
+            prepared.waiters.len(),
+            1,
+            "the duplicate post should wait for the same in-flight opinion"
+        );
+
+        analyzer
+            .complete_x_opinion_misses(&prepared.leader_cache_keys)
+            .await;
+        let mut waiter = prepared.waiters.into_iter().next().unwrap();
+        timeout(Duration::from_millis(50), async {
+            if !*waiter.borrow() {
+                waiter.changed().await.expect("waiter should be signaled");
+            }
+        })
+        .await
+        .expect("duplicate waiter should not hang");
+    }
+
+    #[tokio::test]
+    async fn opinion_misses_join_existing_inflight_post() {
+        let analyzer = AiAnalyzer::for_tests_with_x_summaries(&[]);
+        let rule_scope = rule_cache_scope(&[]);
+
+        let first = analyzer
+            .prepare_x_opinion_misses(&[item("first-client", "123")], &rule_scope)
+            .await;
+        let second = analyzer
+            .prepare_x_opinion_misses(&[item("second-client", "123")], &rule_scope)
+            .await;
+
+        assert_eq!(first.fresh_items.len(), 1);
+        assert_eq!(second.fresh_items.len(), 0);
+        assert_eq!(second.leader_cache_keys.len(), 0);
+        assert_eq!(
+            second.waiters.len(),
+            1,
+            "a concurrent duplicate should join the existing in-flight opinion"
+        );
+
+        analyzer
+            .complete_x_opinion_misses(&first.leader_cache_keys)
+            .await;
+        let mut waiter = second.waiters.into_iter().next().unwrap();
+        timeout(Duration::from_millis(50), async {
+            if !*waiter.borrow() {
+                waiter.changed().await.expect("waiter should be signaled");
+            }
+        })
+        .await
+        .expect("in-flight waiter should not hang");
+    }
 }

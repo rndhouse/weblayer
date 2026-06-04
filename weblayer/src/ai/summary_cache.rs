@@ -4,7 +4,7 @@ use std::{
     collections::HashMap,
     time::{Duration, Instant},
 };
-use tracing::debug;
+use tracing::trace;
 
 const DEFAULT_MAX_ENTRIES: usize = 10_000;
 const DEFAULT_TTL_SECS: u64 = 24 * 60 * 60;
@@ -52,7 +52,7 @@ impl SummaryCache {
         let entry = self.entries.get_mut(&key)?;
         entry.last_used = now;
 
-        debug!(
+        trace!(
             target: "weblayer_daemon::summary_cache",
             client_id = %item.client_id,
             content_id = item.content_id.as_deref(),
@@ -115,6 +115,11 @@ impl SummaryCache {
         {
             self.entries.remove(&key);
         }
+    }
+
+    /// Returns the stable cache key used for an item in one active-rule scope.
+    pub fn cache_key_for_item(item: &ContentItem, rule_scope: &str) -> Option<String> {
+        cache_key(item, rule_scope)
     }
 }
 

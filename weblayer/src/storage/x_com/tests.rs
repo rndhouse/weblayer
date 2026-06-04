@@ -9,10 +9,11 @@ use crate::{
         FeedbackRuleContext,
     },
     storage::{
-        ContentAnnotationInput, ContentAnnotationQuery, ContentQuery, RuleCatchQuery,
-        RuleCreateInput, RuleExamples, RuleQuery, RuleSetProposalAction, RuleSetProposalChange,
-        RuleSetProposalCreateInput, RuleSetProposalDecision, RuleSetProposalQuery, RuleStatusInput,
-        RuleSuggestionQuery, RuleUpdateInput, RuleValidationQuery, XDislikeQuery,
+        ContentAnnotationInput, ContentAnnotationQuery, ContentQuery, RuleCatchCorrectionInput,
+        RuleCatchQuery, RuleCreateInput, RuleExamples, RuleQuery, RuleSetProposalAction,
+        RuleSetProposalChange, RuleSetProposalCreateInput, RuleSetProposalDecision,
+        RuleSetProposalQuery, RuleStatusInput, RuleSuggestionQuery, RuleUpdateInput,
+        RuleValidationQuery, XDislikeQuery, XViewportExposureInput,
     },
 };
 use serde_json::{json, Value};
@@ -141,6 +142,79 @@ fn content_stats_count_unique_posts_and_encounters() {
 }
 
 #[test]
+fn records_x_viewport_exposure_events() {
+    let db_path = temp_db_path("viewport-exposures");
+    let mut store = Store::open(&db_path).expect("store should open");
+
+    let item = item("client-1", Some("123"), "visible post");
+    let stored_count = store
+        .record_viewport_exposures(&[XViewportExposureInput {
+            item,
+            page_url: "https://x.com/home".into(),
+            first_visible_at: Some("2026-06-02T13:00:00.000Z".into()),
+            last_visible_at: Some("2026-06-02T13:00:02.000Z".into()),
+            visible_duration_ms: 2_000,
+            max_visible_ratio: 0.82,
+            viewport_width: Some(1280),
+            viewport_height: Some(720),
+            source: "viewportExposure".into(),
+        }])
+        .expect("exposure should store");
+
+    assert_eq!(stored_count, 1);
+    let row: (
+        String,
+        Option<String>,
+        i64,
+        f64,
+        Option<i64>,
+        Option<i64>,
+        String,
+    ) = store
+        .connection
+        .query_row(
+            "
+            SELECT
+                storage_key,
+                post_id,
+                visible_duration_ms,
+                max_visible_ratio,
+                viewport_width,
+                viewport_height,
+                snapshot_json
+            FROM content_exposure_events
+            ",
+            [],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                ))
+            },
+        )
+        .expect("exposure event should exist");
+
+    assert_eq!(row.0, "x:id:123");
+    assert_eq!(row.1.as_deref(), Some("123"));
+    assert_eq!(row.2, 2_000);
+    assert_eq!(row.3, 0.82);
+    assert_eq!(row.4, Some(1280));
+    assert_eq!(row.5, Some(720));
+    let snapshot: Value = serde_json::from_str(&row.6).expect("snapshot should parse");
+    assert_eq!(
+        snapshot.pointer("/item/text").and_then(Value::as_str),
+        Some("visible post")
+    );
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap().parent().unwrap());
+}
+
+#[test]
 fn author_review_states_count_seen_posts_and_active_feedback() {
     let db_path = temp_db_path("author-review-states");
     let mut store = Store::open(&db_path).expect("store should open");
@@ -219,7 +293,15 @@ fn records_rule_decision_events_and_stats() {
     let db_path = temp_db_path("records-decision-events");
     let mut store = Store::open(&db_path).expect("store should open");
     let first = item("client-1", Some("123"), "engagement bait one");
-    let second = item("client-2", Some("456"), "engagement bait two");
+    let mut second = item("client-2", Some("456"), "engagement bait two");
+    second.metadata = json!({
+        "xCom": {
+            "postTextParseFailure": {
+                "reason": "missingTweetText",
+                "html": "<article data-testid=\"tweet\">engagement bait two</article>"
+            }
+        }
+    });
     let kept = item("client-3", Some("789"), "ordinary post");
 
     store
@@ -307,6 +389,15 @@ fn records_rule_decision_events_and_stats() {
     assert_eq!(catches.items.len(), 2);
     assert_eq!(catches.items[0].content.text, "engagement bait two");
     assert_eq!(
+        catches.items[0]
+            .content
+            .capture_diagnostics
+            .as_ref()
+            .and_then(|diagnostics| diagnostics.get("reason"))
+            .and_then(serde_json::Value::as_str),
+        Some("missingTweetText")
+    );
+    assert_eq!(
         catches.items[0].reason.as_deref(),
         Some("Matched two rules")
     );
@@ -335,6 +426,130 @@ fn records_rule_decision_events_and_stats() {
         )
         .expect("missing rule should not error")
         .is_none());
+
+    let correction = store
+        .correct_rule_catch(RuleCatchCorrectionInput {
+            rule_id: "x-engagement".into(),
+            event_id: catches.items[0].event_id,
+            reason: "Wanted to see this post".into(),
+            source: "test:false-positive".into(),
+        })
+        .expect("correction should store")
+        .expect("catch should be correctable");
+    assert_eq!(correction.rule_id, "x-engagement");
+    assert!(!correction.removed_event);
+    assert_eq!(correction.remaining_matched_rule_ids, vec!["x-bait"]);
+    assert_eq!(correction.annotation.annotation_type, "ruleFalsePositive");
+    assert_eq!(correction.annotation.key, "x-engagement");
+    assert_eq!(
+        correction
+            .annotation
+            .value
+            .pointer("/originalDecision/matchedRuleIds/0")
+            .and_then(serde_json::Value::as_str),
+        Some("x-engagement")
+    );
+    let negative_example = correction
+        .rule
+        .examples
+        .negative
+        .iter()
+        .find(|example| example.contains("engagement bait two"))
+        .expect("corrected post should become a negative example");
+    assert!(negative_example.contains("Reason to keep: Wanted to see this post"));
+
+    let corrected_engagement_catches = store
+        .rule_catches(
+            "x-engagement",
+            RuleCatchQuery {
+                limit: 10,
+                offset: 0,
+            },
+        )
+        .expect("corrected catches should load")
+        .expect("rule should exist");
+    assert_eq!(corrected_engagement_catches.total_matching, 2);
+    assert_eq!(
+        corrected_engagement_catches
+            .items
+            .iter()
+            .find(|item| item.correction.is_none())
+            .expect("uncorrected catch should remain")
+            .content
+            .text,
+        "engagement bait one"
+    );
+    let corrected_item = corrected_engagement_catches
+        .items
+        .iter()
+        .find(|item| item.content.text == "engagement bait two")
+        .expect("corrected catch should remain visible");
+    assert_eq!(
+        corrected_item
+            .correction
+            .as_ref()
+            .and_then(|correction| correction.value.get("reason"))
+            .and_then(serde_json::Value::as_str),
+        Some("Wanted to see this post")
+    );
+    let bait_catches = store
+        .rule_catches(
+            "x-bait",
+            RuleCatchQuery {
+                limit: 10,
+                offset: 0,
+            },
+        )
+        .expect("bait catches should load")
+        .expect("rule should exist");
+    assert_eq!(bait_catches.total_matching, 1);
+    assert_eq!(bait_catches.items[0].content.text, "engagement bait two");
+
+    let annotations = store
+        .content_annotations(ContentAnnotationQuery {
+            storage_key: Some(correction.storage_key.clone()),
+            content_id: None,
+            content_kind: None,
+            annotation_type: Some("ruleFalsePositive".into()),
+            key: Some("x-engagement".into()),
+            source: Some("test:false-positive".into()),
+            limit: 10,
+            offset: 0,
+        })
+        .expect("false positive annotations should load");
+    assert_eq!(annotations.total_matching, 1);
+
+    let removed_correction = store
+        .correct_rule_catch(RuleCatchCorrectionInput {
+            rule_id: "x-engagement".into(),
+            event_id: corrected_engagement_catches
+                .items
+                .iter()
+                .find(|item| item.correction.is_none())
+                .expect("uncorrected catch should still be correctable")
+                .event_id,
+            reason: "Wanted to see this post".into(),
+            source: "test:false-positive".into(),
+        })
+        .expect("single-rule correction should store")
+        .expect("single-rule catch should be correctable");
+    assert!(removed_correction.removed_event);
+    assert!(removed_correction.remaining_matched_rule_ids.is_empty());
+    let final_engagement_catches = store
+        .rule_catches(
+            "x-engagement",
+            RuleCatchQuery {
+                limit: 10,
+                offset: 0,
+            },
+        )
+        .expect("final catches should load")
+        .expect("rule should exist");
+    assert_eq!(final_engagement_catches.total_matching, 2);
+    assert!(final_engagement_catches
+        .items
+        .iter()
+        .all(|item| item.correction.is_some()));
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap().parent().unwrap());
 }
@@ -406,6 +621,56 @@ fn searches_content_with_fts_index() {
     assert_eq!(
         page.items[0].snippet.as_deref(),
         Some("Codex makes local search useful")
+    );
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap().parent().unwrap());
+}
+
+#[test]
+fn content_includes_parse_failure_diagnostics_when_available() {
+    let db_path = temp_db_path("content-parse-diagnostics");
+    let mut store = Store::open(&db_path).expect("store should open");
+    let mut failed_parse = item("client-1", Some("123"), "");
+    failed_parse.metadata = json!({
+        "xCom": {
+            "postTextParseFailure": {
+                "reason": "missingTweetText",
+                "html": "<article data-testid=\"tweet\"><time>2:22 AM</time></article>",
+                "links": [
+                    { "href": "https://x.com/user/status/123", "text": "status" }
+                ]
+            }
+        }
+    });
+
+    store
+        .record_batch(&batch("x.com", vec![failed_parse]))
+        .expect("batch should store");
+
+    let page = store
+        .content(ContentQuery {
+            search: None,
+            limit: 100,
+            offset: 0,
+        })
+        .expect("content should load");
+
+    assert_eq!(page.items.len(), 1);
+    let diagnostics = page.items[0]
+        .capture_diagnostics
+        .as_ref()
+        .expect("diagnostics should be projected");
+    assert_eq!(
+        diagnostics
+            .get("reason")
+            .and_then(serde_json::Value::as_str),
+        Some("missingTweetText")
+    );
+    assert_eq!(
+        diagnostics
+            .pointer("/links/0/href")
+            .and_then(serde_json::Value::as_str),
+        Some("https://x.com/user/status/123")
     );
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap().parent().unwrap());

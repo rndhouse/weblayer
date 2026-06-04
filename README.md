@@ -21,3 +21,7 @@ WebLayer currently supports X.com posts, adding a local dislike control so you c
 <p align="center">
   <img src="assets/x-dislike-button.png" alt="WebLayer dislike button on an X.com post" width="520">
 </p>
+
+<p align="center">
+  <img src="assets/x-hidden-post-example.png" alt="WebLayer hidden post placeholder on X.com" width="520">
+</p>

@@ -2,7 +2,7 @@ use super::{rule_curation, AppState};
 use crate::{
     core::{
         DebugStatsMetric, DebugStatsPanel, DebugStatsSection, DomAnalysisBatch, DomCommand,
-        DomElementSnapshot, FeedbackKind, PageSnapshot,
+        DomElementSnapshot, FeedbackKind, PageSnapshot, ViewportExposureBatch,
     },
     sites,
     storage::{ContentStore, RuleQuery, StorageError, XDislikeQuery},
@@ -59,12 +59,20 @@ pub(super) async fn dom_feedback(
     Ok(Json(DomFeedbackResponse { commands }))
 }
 
+pub(super) async fn dom_exposures(
+    State(state): State<AppState>,
+    Json(batch): Json<ViewportExposureBatch>,
+) -> Result<Json<DomExposureResponse>, super::error::ApiError> {
+    let stored_count = sites::record_viewport_exposures(&batch, &state.content_store)?;
+    Ok(Json(DomExposureResponse { stored_count }))
+}
+
 pub(super) fn append_debug_stats_command(
     state: &AppState,
     page_url: &str,
     commands: &mut Vec<DomCommand>,
 ) {
-    if !state.x_debug_stats || !is_x_com_url(page_url) {
+    if !is_x_com_url(page_url) {
         return;
     }
 
@@ -78,6 +86,7 @@ pub(super) fn append_debug_stats_command(
 
 fn x_debug_stats_command(content_store: &ContentStore) -> Result<DomCommand, StorageError> {
     let content_stats = content_store.x_content_stats()?;
+    let viewport_exposures = content_store.x_viewport_exposure_count()?;
     let active_feedback = content_store
         .x_dislikes(XDislikeQuery {
             active: Some(true),
@@ -109,6 +118,7 @@ fn x_debug_stats_command(content_store: &ContentStore) -> Result<DomCommand, Sto
             metrics: vec![
                 metric("Unique posts", content_stats.unique_items),
                 metric("Post encounters", content_stats.total_encounters),
+                metric("Viewport exposures", viewport_exposures),
                 metric("Active feedback", active_feedback),
                 metric("Active rules", active_rules),
             ],
@@ -200,23 +210,15 @@ pub(super) fn log_dom_batch(batch: &DomAnalysisBatch) {
     let received_at_unix_ms = now_unix_ms();
 
     for element in &batch.elements {
-        match serde_json::to_string(element) {
-            Ok(element_json) => {
-                info!(
-                    target: "weblayer_daemon::captured_dom",
-                    page_url = batch.page.url.as_str(),
-                    client_id = element.client_id.as_str(),
-                    selector = element.selector.as_deref(),
-                    snapshot_hash = element.snapshot_hash.as_deref(),
-                    received_at_unix_ms,
-                    element = %element_json,
-                    "captured DOM region"
-                );
-            }
-            Err(error) => {
-                warn!(%error, "failed to serialize DOM snapshot for logging");
-            }
-        }
+        info!(
+            target: "weblayer_daemon::captured_dom",
+            page_url = batch.page.url.as_str(),
+            client_id = element.client_id.as_str(),
+            selector = element.selector.as_deref(),
+            snapshot_hash = element.snapshot_hash.as_deref(),
+            received_at_unix_ms,
+            "captured DOM region"
+        );
     }
 }
 
@@ -258,6 +260,14 @@ pub struct DomFeedbackRequest {
 pub struct DomFeedbackResponse {
     /// Commands for the extension's generic DOM executor.
     pub commands: Vec<DomCommand>,
+}
+
+/// Response for the DOM viewport exposure endpoint.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DomExposureResponse {
+    /// Number of exposure records stored by the daemon.
+    pub stored_count: usize,
 }
 
 #[cfg(test)]

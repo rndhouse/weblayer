@@ -5,10 +5,14 @@ use super::{
 };
 use crate::{
     core::{AnalysisBatch, ContentItem},
-    storage::{ContentPage, ContentQuery, ContentStats, StoredContentItem, XAuthorReviewState},
+    storage::{
+        ContentPage, ContentQuery, ContentStats, StoredContentItem, XAuthorReviewState,
+        XViewportExposureInput,
+    },
 };
 use rusqlite::{params, Row};
 use serde::Serialize;
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use tracing::trace;
 
@@ -85,6 +89,86 @@ impl Store {
         Ok(())
     }
 
+    pub(in crate::storage) fn record_viewport_exposures(
+        &mut self,
+        exposures: &[XViewportExposureInput],
+    ) -> Result<usize> {
+        let created_at = now_unix_ms();
+        let transaction = self.connection.transaction()?;
+        let mut stored_count = 0usize;
+        let mut skipped_count = 0usize;
+
+        for exposure in exposures {
+            let Some(record) =
+                StoredTweet::from_item("viewportExposure", &exposure.item, created_at)?
+            else {
+                skipped_count += 1;
+                continue;
+            };
+            let snapshot_json = serde_json::to_string(&json!({
+                "pageUrl": exposure.page_url,
+                "firstVisibleAt": exposure.first_visible_at,
+                "lastVisibleAt": exposure.last_visible_at,
+                "visibleDurationMs": exposure.visible_duration_ms,
+                "maxVisibleRatio": exposure.max_visible_ratio,
+                "viewportWidth": exposure.viewport_width,
+                "viewportHeight": exposure.viewport_height,
+                "source": exposure.source,
+                "item": exposure.item,
+            }))?;
+
+            transaction.execute(
+                "
+                INSERT INTO content_exposure_events (
+                    site,
+                    storage_key,
+                    post_id,
+                    page_url,
+                    client_id,
+                    first_visible_at,
+                    last_visible_at,
+                    visible_duration_ms,
+                    max_visible_ratio,
+                    viewport_width,
+                    viewport_height,
+                    created_at_unix_ms,
+                    source,
+                    snapshot_json
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+                ",
+                params![
+                    "x.com",
+                    record.storage_key,
+                    record.post_id,
+                    clean_optional(Some(exposure.page_url.as_str()))
+                        .unwrap_or_else(|| exposure.page_url.clone()),
+                    exposure.item.client_id.as_str(),
+                    exposure.first_visible_at.as_deref(),
+                    exposure.last_visible_at.as_deref(),
+                    exposure_duration_ms_to_i64(exposure.visible_duration_ms),
+                    exposure.max_visible_ratio.clamp(0.0, 1.0),
+                    exposure.viewport_width,
+                    exposure.viewport_height,
+                    created_at,
+                    exposure.source.as_str(),
+                    snapshot_json,
+                ],
+            )?;
+            stored_count += 1;
+        }
+
+        transaction.commit()?;
+
+        trace!(
+            target: "weblayer_daemon::storage::x_com",
+            stored_count,
+            skipped_count,
+            "stored X viewport exposures"
+        );
+
+        Ok(stored_count)
+    }
+
     pub(in crate::storage) fn content_stats(&self) -> Result<ContentStats> {
         Ok(self.connection.query_row(
             "
@@ -112,6 +196,16 @@ impl Store {
                 })
             },
         )?)
+    }
+
+    pub(in crate::storage) fn viewport_exposure_count(&self) -> Result<usize> {
+        let count = self.connection.query_row(
+            "SELECT COUNT(*) FROM content_exposure_events",
+            [],
+            |row| row.get::<_, i64>(0),
+        )?;
+
+        Ok(count.max(0) as usize)
     }
 
     pub(in crate::storage) fn author_review_states(
@@ -190,7 +284,8 @@ impl Store {
                 first_seen_at_unix_ms,
                 last_seen_at_unix_ms,
                 seen_count,
-                latest_captured_at
+                latest_captured_at,
+                latest_payload_json
             FROM tweets
             ORDER BY last_seen_at_unix_ms DESC, storage_key ASC
             LIMIT ?1 OFFSET ?2
@@ -198,7 +293,7 @@ impl Store {
         )?;
         let items = statement
             .query_map(params![limit, offset], |row| {
-                content_item_from_row(row, None)
+                content_item_from_row(row, None, Some(9))
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
 
@@ -242,6 +337,7 @@ impl Store {
                 tweets.last_seen_at_unix_ms,
                 tweets.seen_count,
                 tweets.latest_captured_at,
+                tweets.latest_payload_json,
                 snippet(tweets_fts, 0, '', '', '...', 24) AS snippet
             FROM tweets_fts
             JOIN tweets ON tweets.rowid = tweets_fts.rowid
@@ -252,7 +348,7 @@ impl Store {
         )?;
         let items = statement
             .query_map(params![match_query, limit, offset], |row| {
-                content_item_from_row(row, row.get(9)?)
+                content_item_from_row(row, row.get(10)?, Some(9))
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
 
@@ -320,7 +416,13 @@ struct StoredTweetPayload<'a> {
 pub(super) fn content_item_from_row(
     row: &Row<'_>,
     snippet: Option<String>,
+    latest_payload_json_index: Option<usize>,
 ) -> rusqlite::Result<StoredContentItem> {
+    let latest_payload_json = latest_payload_json_index
+        .map(|index| row.get::<_, Option<String>>(index))
+        .transpose()?
+        .flatten();
+
     Ok(StoredContentItem {
         content_kind: "post".into(),
         storage_key: row.get(0)?,
@@ -333,7 +435,20 @@ pub(super) fn content_item_from_row(
         last_seen_at_unix_ms: row.get(6)?,
         seen_count: row.get(7)?,
         latest_captured_at: row.get(8)?,
+        capture_diagnostics: latest_payload_json
+            .as_deref()
+            .and_then(capture_diagnostics_from_payload_json),
     })
+}
+
+pub(super) fn capture_diagnostics_from_payload_json(payload_json: &str) -> Option<Value> {
+    let payload: Value = serde_json::from_str(payload_json).ok()?;
+    let diagnostics = payload.pointer("/item/metadata/xCom/postTextParseFailure")?;
+    (!diagnostics.is_null()).then(|| diagnostics.clone())
+}
+
+fn exposure_duration_ms_to_i64(value: u64) -> i64 {
+    value.min(i64::MAX as u64) as i64
 }
 
 fn fts_match_query(search: &str) -> Option<String> {

@@ -82,6 +82,33 @@ pub(super) fn apply_stored_feedback(
         .collect()
 }
 
+pub(super) fn apply_previous_hide_decisions(
+    content_store: &ContentStore,
+    items: &[ContentItem],
+    active_rules: &[AiContentRule],
+    decisions: Vec<ContentDecision>,
+) -> Vec<ContentDecision> {
+    let items_by_client_id: HashMap<&str, &ContentItem> = items
+        .iter()
+        .map(|item| (item.client_id.as_str(), item))
+        .collect();
+
+    decisions
+        .into_iter()
+        .map(|decision| {
+            if matches!(decision.action, crate::core::DecisionAction::Hide) {
+                return decision;
+            }
+
+            let Some(item) = items_by_client_id.get(decision.client_id.as_str()) else {
+                return decision;
+            };
+
+            previous_hide_decision(content_store, item, active_rules).unwrap_or(decision)
+        })
+        .collect()
+}
+
 pub(super) fn record_decision_events(
     content_store: &ContentStore,
     items: &[ContentItem],
@@ -130,6 +157,42 @@ pub(super) fn stored_dislike_decision(
             None
         }
     }
+}
+
+pub(super) fn previous_hide_decision(
+    content_store: &ContentStore,
+    item: &ContentItem,
+    active_rules: &[AiContentRule],
+) -> Option<ContentDecision> {
+    match content_store.x_latest_hide_decision(item) {
+        Ok(Some(decision)) if previous_hide_decision_is_active(&decision, active_rules) => {
+            Some(decision)
+        }
+        Ok(_) => None,
+        Err(error) => {
+            warn!(
+                %error,
+                client_id = item.client_id.as_str(),
+                content_id = item.content_id.as_deref(),
+                "failed to read previous X hide decision"
+            );
+            None
+        }
+    }
+}
+
+fn previous_hide_decision_is_active(
+    decision: &ContentDecision,
+    active_rules: &[AiContentRule],
+) -> bool {
+    if decision.matched_rule_ids.is_empty() {
+        return false;
+    }
+
+    decision
+        .matched_rule_ids
+        .iter()
+        .any(|rule_id| active_rules.iter().any(|rule| rule.id == *rule_id))
 }
 
 pub(super) fn cached_decide_items(

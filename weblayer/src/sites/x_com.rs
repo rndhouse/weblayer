@@ -8,9 +8,9 @@ use crate::{
     ai::{AiAnalyzer, AiContentRule},
     core::{
         AnalysisBatch, DomAnalysisBatch, DomCommand, FeedbackContext, FeedbackKind,
-        FeedbackRuleContext,
+        FeedbackRuleContext, ViewportExposureBatch,
     },
-    storage::{ContentStore, StorageError, XAuthorReviewState},
+    storage::{ContentStore, StorageError, XAuthorReviewState, XViewportExposureInput},
 };
 use std::collections::HashMap;
 use tracing::warn;
@@ -46,6 +46,12 @@ pub async fn analyze_dom(
         &decisions,
         "domAnalysis",
     );
+    let decisions = decide::apply_previous_hide_decisions(
+        content_store,
+        &content_batch.items,
+        &active_rules,
+        decisions,
+    );
     commands::commands_from_decisions(extracted_items, decisions, &feedback_context, content_store)
 }
 
@@ -78,6 +84,12 @@ pub fn cached_dom_commands(
         &decisions,
         "cachedDomAnalysis",
     );
+    let decisions = decide::apply_previous_hide_decisions(
+        content_store,
+        &content_batch.items,
+        &active_rules,
+        decisions,
+    );
 
     Some(commands::commands_from_decisions(
         extracted_items,
@@ -98,7 +110,11 @@ pub fn pending_dom_commands(
     let feedback_context = feedback_context_from_active_rules(&active_rules);
     let decisions = extracted_items
         .iter()
-        .filter_map(|extracted| decide::stored_dislike_decision(content_store, &extracted.item))
+        .filter_map(|extracted| {
+            decide::stored_dislike_decision(content_store, &extracted.item).or_else(|| {
+                decide::previous_hide_decision(content_store, &extracted.item, &active_rules)
+            })
+        })
         .collect();
     let mut decisions_by_client_id: std::collections::HashMap<_, _> =
         commands::expand_hide_decisions(&extracted_items, decisions)
@@ -154,6 +170,51 @@ pub fn apply_feedback(
     )?;
 
     Ok(Vec::new())
+}
+
+/// Records browser-reported X/Twitter viewport exposures.
+pub fn record_viewport_exposures(
+    batch: &ViewportExposureBatch,
+    content_store: &ContentStore,
+) -> Result<usize, StorageError> {
+    let analysis_batch = DomAnalysisBatch {
+        page: batch.page.clone(),
+        elements: batch
+            .exposures
+            .iter()
+            .map(|exposure| exposure.element.clone())
+            .collect(),
+    };
+    let extracted_items = extract::extract_items(&analysis_batch);
+    if extracted_items.is_empty() {
+        return Ok(0);
+    }
+
+    let content_batch = content_batch_from_extracted(&extracted_items);
+    record_content_batch(content_store, &content_batch);
+
+    let exposures = extracted_items
+        .into_iter()
+        .filter_map(|extracted| {
+            let exposure = batch
+                .exposures
+                .iter()
+                .find(|exposure| exposure.element.client_id == extracted.item.client_id)?;
+            Some(XViewportExposureInput {
+                item: extracted.item,
+                page_url: batch.page.url.clone(),
+                first_visible_at: exposure.first_visible_at.clone(),
+                last_visible_at: exposure.last_visible_at.clone(),
+                visible_duration_ms: exposure.visible_duration_ms,
+                max_visible_ratio: exposure.max_visible_ratio,
+                viewport_width: exposure.viewport_width,
+                viewport_height: exposure.viewport_height,
+                source: "viewportExposure".into(),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    content_store.record_x_viewport_exposures(&exposures)
 }
 
 fn feedback_control_with_stored_context(

@@ -6,6 +6,10 @@ const MAX_LINKS = 80;
 const MAX_ATTRIBUTES = 40;
 const FEEDBACK_REASON_SAVE_DEBOUNCE_MS = 550;
 const DEBUG_STATS_PANEL_ID = "weblayer-debug-stats-panel";
+const VIEWPORT_EXPOSURE_MIN_VISIBLE_RATIO = 0.5;
+const VIEWPORT_EXPOSURE_MIN_VISIBLE_MS = 750;
+const VIEWPORT_EXPOSURE_FLUSH_MS = 500;
+const MAX_VIEWPORT_EXPOSURES_PER_REQUEST = 50;
 const FEEDBACK_REASON_PRESETS = [
   "Low information",
   "Rage bait",
@@ -19,12 +23,18 @@ let nextFeedbackSaveId = 1;
 let scanTimer = null;
 let requestInFlight = false;
 let activeCaptureContextKey = null;
+let nextHiddenId = 1;
+let viewportExposureObserver = null;
+let viewportExposureStates = new WeakMap();
+let viewportExposureFlushTimer = null;
+let viewportExposureInFlight = false;
 
 const elementIds = new WeakMap();
 const elementsByClientId = new Map();
 const snapshotsByClientId = new Map();
 const feedbackReasonTimers = new WeakMap();
 const queuedSnapshots = [];
+const queuedViewportExposures = [];
 
 scheduleScan();
 
@@ -40,6 +50,10 @@ observer.observe(document.documentElement, {
 
 document.addEventListener("click", handleWebLayerClick, true);
 document.addEventListener("pointerdown", handleWebLayerPointerDown, true);
+document.addEventListener("visibilitychange", handleVisibilityChange, true);
+if (typeof window.addEventListener === "function") {
+  window.addEventListener("pagehide", handlePageHide, true);
+}
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message || message.type !== "weblayer:applyCommands") {
@@ -74,10 +88,6 @@ function scanForRegions() {
       continue;
     }
 
-    if (element.dataset.weblayerSnapshotHash === snapshot.snapshotHash) {
-      continue;
-    }
-
     if (
       element.dataset.weblayerKeepVisibleAfterFeedbackHash &&
       element.dataset.weblayerKeepVisibleAfterFeedbackHash !== snapshot.snapshotHash
@@ -85,11 +95,17 @@ function scanForRegions() {
       delete element.dataset.weblayerKeepVisibleAfterFeedbackHash;
     }
 
+    const alreadyCaptured = element.dataset.weblayerSnapshotHash === snapshot.snapshotHash;
     element.dataset.weblayerSnapshotHash = snapshot.snapshotHash;
-    element.dataset.weblayerState = "queued";
     setSnapshotCaptureContextKey(snapshot, context.key);
     elementsByClientId.set(snapshot.clientId, element);
     snapshotsByClientId.set(snapshot.clientId, snapshot);
+    trackViewportExposure(element, snapshot, context);
+    if (alreadyCaptured) {
+      continue;
+    }
+
+    element.dataset.weblayerState = "queued";
     installOptimisticFeedbackControl(element, snapshot);
     queuedSnapshots.push(snapshot);
   }
@@ -142,6 +158,12 @@ function currentCaptureContext() {
 }
 
 function clearCaptureState() {
+  finalizeVisibleViewportExposures();
+  if (viewportExposureObserver) {
+    viewportExposureObserver.disconnect();
+    viewportExposureObserver = null;
+  }
+  viewportExposureStates = new WeakMap();
   queuedSnapshots.length = 0;
   elementsByClientId.clear();
   snapshotsByClientId.clear();
@@ -336,6 +358,157 @@ async function flushQueue(context = refreshCaptureContext()) {
   }
 }
 
+function trackViewportExposure(element, snapshot, context) {
+  if (!context || context.id !== "x.com" || !("IntersectionObserver" in window)) {
+    return;
+  }
+
+  let state = viewportExposureStates.get(element);
+  if (state) {
+    state.snapshot = snapshot;
+    state.contextKey = context.key;
+    return;
+  }
+
+  state = {
+    snapshot,
+    contextKey: context.key,
+    visibleSinceMs: null,
+    firstVisibleAt: null,
+    maxVisibleRatio: 0
+  };
+  viewportExposureStates.set(element, state);
+  viewportExposureObserverForPage().observe(element);
+}
+
+function viewportExposureObserverForPage() {
+  if (viewportExposureObserver) {
+    return viewportExposureObserver;
+  }
+
+  viewportExposureObserver = new IntersectionObserver(handleViewportIntersections, {
+    threshold: [0, VIEWPORT_EXPOSURE_MIN_VISIBLE_RATIO, 0.75, 1]
+  });
+  return viewportExposureObserver;
+}
+
+function handleViewportIntersections(entries) {
+  const nowMs = performanceNow();
+
+  for (const entry of entries) {
+    const state = viewportExposureStates.get(entry.target);
+    if (!state) {
+      continue;
+    }
+
+    const visibleRatio = Number.isFinite(entry.intersectionRatio)
+      ? entry.intersectionRatio
+      : 0;
+    if (visibleRatio >= VIEWPORT_EXPOSURE_MIN_VISIBLE_RATIO && isVisibleRegion(entry.target)) {
+      if (state.visibleSinceMs === null) {
+        state.visibleSinceMs = nowMs;
+        state.firstVisibleAt = new Date().toISOString();
+        state.maxVisibleRatio = visibleRatio;
+      } else {
+        state.maxVisibleRatio = Math.max(state.maxVisibleRatio, visibleRatio);
+      }
+      continue;
+    }
+
+    finalizeViewportExposureState(state, nowMs);
+  }
+}
+
+function handleVisibilityChange() {
+  if (document.visibilityState === "hidden") {
+    finalizeAndFlushViewportExposures();
+  }
+}
+
+function handlePageHide() {
+  finalizeAndFlushViewportExposures();
+}
+
+function finalizeAndFlushViewportExposures() {
+  finalizeVisibleViewportExposures();
+  flushViewportExposureQueue();
+}
+
+function finalizeVisibleViewportExposures() {
+  const nowMs = performanceNow();
+  for (const element of Array.from(document.querySelectorAll("[data-weblayer-snapshot-hash]"))) {
+    const state = viewportExposureStates.get(element);
+    if (state) {
+      finalizeViewportExposureState(state, nowMs);
+    }
+  }
+}
+
+function finalizeViewportExposureState(state, nowMs) {
+  if (state.visibleSinceMs === null) {
+    return;
+  }
+
+  const visibleDurationMs = Math.max(0, Math.round(nowMs - state.visibleSinceMs));
+  if (visibleDurationMs >= VIEWPORT_EXPOSURE_MIN_VISIBLE_MS) {
+    queuedViewportExposures.push({
+      element: snapshotForMessage(state.snapshot),
+      firstVisibleAt: state.firstVisibleAt,
+      lastVisibleAt: new Date().toISOString(),
+      visibleDurationMs,
+      maxVisibleRatio: state.maxVisibleRatio,
+      viewportWidth: Number.isFinite(window.innerWidth) ? Math.round(window.innerWidth) : null,
+      viewportHeight: Number.isFinite(window.innerHeight) ? Math.round(window.innerHeight) : null
+    });
+    scheduleViewportExposureFlush();
+  }
+
+  state.visibleSinceMs = null;
+  state.firstVisibleAt = null;
+  state.maxVisibleRatio = 0;
+}
+
+function scheduleViewportExposureFlush() {
+  if (viewportExposureFlushTimer !== null) {
+    return;
+  }
+
+  viewportExposureFlushTimer = setTimeout(() => {
+    viewportExposureFlushTimer = null;
+    flushViewportExposureQueue();
+  }, VIEWPORT_EXPOSURE_FLUSH_MS);
+}
+
+async function flushViewportExposureQueue() {
+  if (viewportExposureInFlight || queuedViewportExposures.length === 0) {
+    return;
+  }
+
+  viewportExposureInFlight = true;
+  const batch = queuedViewportExposures.splice(0, MAX_VIEWPORT_EXPOSURES_PER_REQUEST);
+
+  try {
+    await sendMessage({
+      type: "weblayer:viewportExposures",
+      page: pageSnapshot(),
+      exposures: batch
+    });
+  } catch (_error) {
+    // Exposure data is best-effort; avoid building an unbounded queue when the daemon is down.
+  } finally {
+    viewportExposureInFlight = false;
+    if (queuedViewportExposures.length > 0) {
+      scheduleViewportExposureFlush();
+    }
+  }
+}
+
+function performanceNow() {
+  return window.performance && typeof window.performance.now === "function"
+    ? window.performance.now()
+    : Date.now();
+}
+
 function sendMessage(message) {
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage(message, (response) => {
@@ -372,15 +545,19 @@ function applyCommands(commands) {
       continue;
     }
 
+    if (command.action === "hide") {
+      const hiddenElement = hideContainerForElement(element);
+      const wasHiddenExpanded = hiddenElement.classList.contains("weblayer-hidden--expanded");
+      clearWebLayerChanges(hiddenElement);
+      hiddenElement.dataset.weblayerState = command.action || "hide";
+      collapseHiddenElement(hiddenElement, command, { expanded: wasHiddenExpanded });
+      continue;
+    }
+
     clearWebLayerChanges(element);
     element.dataset.weblayerState = command.action || "keep";
 
     if (command.action === "keep") {
-      continue;
-    }
-
-    if (command.action === "hide") {
-      element.classList.add("weblayer-hidden");
       continue;
     }
 
@@ -408,7 +585,7 @@ function renderDebugStatsPanel(stats) {
     return;
   }
 
-  const mount = debugStatsMountElement();
+  const mount = debugStatsMountTarget();
   let panel = document.getElementById(DEBUG_STATS_PANEL_ID);
   if (!panel) {
     panel = document.createElement("div");
@@ -425,12 +602,7 @@ function renderDebugStatsPanel(stats) {
     panel.append(createDebugStatsSection(section));
   }
 
-  if (mount) {
-    if (panel.parentElement !== mount) {
-      mount.prepend(panel);
-    } else if (mount.firstElementChild !== panel) {
-      mount.prepend(panel);
-    }
+  if (mount && placeDebugStatsPanel(panel, mount)) {
     return;
   }
 
@@ -447,16 +619,45 @@ function removeDebugStatsPanel() {
   }
 }
 
-function debugStatsMountElement() {
+function placeDebugStatsPanel(panel, mount) {
+  const element = mount.element;
+  if (!(element instanceof Element) || !document.documentElement.contains(element)) {
+    return false;
+  }
+
+  if (mount.placement === "before" && element.parentElement) {
+    if (panel.parentElement !== element.parentElement || panel.nextElementSibling !== element) {
+      element.parentElement.insertBefore(panel, element);
+    }
+    return true;
+  }
+
+  if (panel.parentElement !== element) {
+    element.prepend(panel);
+  } else if (element.firstElementChild !== panel) {
+    element.prepend(panel);
+  }
+  return true;
+}
+
+function debugStatsMountTarget() {
   const context = currentCaptureContext();
   if (!context || typeof context.debugStatsMount !== "function") {
     return null;
   }
 
   const mount = context.debugStatsMount();
-  return mount instanceof Element && document.documentElement.contains(mount)
-    ? mount
-    : null;
+  let target = null;
+  if (mount instanceof Element) {
+    target = { element: mount, placement: "prepend" };
+  } else if (mount && mount.element instanceof Element) {
+    target = {
+      element: mount.element,
+      placement: mount.placement === "before" ? "before" : "prepend"
+    };
+  }
+
+  return target && document.documentElement.contains(target.element) ? target : null;
 }
 
 function createDebugStatsHeader(stats) {
@@ -558,6 +759,18 @@ function createDebugStatsMetric(metric) {
 
 function handleWebLayerClick(event) {
   const target = eventTargetElement(event);
+  const hiddenToggle = target ? target.closest(".weblayer-hidden-action") : null;
+  if (hiddenToggle) {
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    const element = hiddenElementForToggle(hiddenToggle);
+    if (element instanceof Element) {
+      toggleHiddenElementExpanded(element);
+    }
+    return;
+  }
+
   const button = target ? target.closest(".weblayer-feedback-button") : null;
   if (!button) {
     return;
@@ -749,6 +962,7 @@ function showFeedbackReasonPanel(element, button) {
 function createFeedbackReasonPanel(element, button) {
   const clientId = button.dataset.weblayerClientId || "";
   const panel = document.createElement("div");
+  const heading = document.createElement("div");
   const label = document.createElement("div");
   const status = document.createElement("div");
   const chips = document.createElement("div");
@@ -759,6 +973,9 @@ function createFeedbackReasonPanel(element, button) {
   panel.dataset.weblayerClientId = clientId;
   panel.dataset.weblayerSavedReason = "";
   panel.dataset.weblayerSaveState = "idle";
+
+  heading.className = "weblayer-feedback-panel-heading";
+  heading.dataset.weblayerUi = "true";
 
   label.className = "weblayer-feedback-panel-label";
   label.dataset.weblayerUi = "true";
@@ -821,7 +1038,8 @@ function createFeedbackReasonPanel(element, button) {
   panel.addEventListener("click", stopPanelEvent);
   panel.addEventListener("keydown", stopPanelEvent);
 
-  panel.append(label, status, chips, input);
+  heading.append(label, status);
+  panel.append(heading, chips, input);
   return panel;
 }
 
@@ -1031,7 +1249,32 @@ function targetStillMatches(element, target) {
 }
 
 function clearWebLayerChanges(element) {
-  element.classList.remove("weblayer-hidden", "weblayer-dimmed", "weblayer-replaced");
+  element.classList.remove(
+    "weblayer-hidden",
+    "weblayer-hidden--expanded",
+    "weblayer-dimmed",
+    "weblayer-replaced"
+  );
+
+  const placeholder = element.querySelector(":scope > .weblayer-hidden-placeholder");
+  if (placeholder) {
+    placeholder.remove();
+  }
+
+  const hiddenId = element.dataset.weblayerHiddenId || "";
+  const siblingPlaceholder = hiddenId ? hiddenPlaceholderForId(hiddenId) : null;
+  if (siblingPlaceholder) {
+    siblingPlaceholder.remove();
+  }
+  delete element.dataset.weblayerHiddenId;
+
+  const hiddenContent = element.querySelector(":scope > .weblayer-hidden-content");
+  if (hiddenContent) {
+    while (hiddenContent.firstChild) {
+      element.insertBefore(hiddenContent.firstChild, hiddenContent);
+    }
+    hiddenContent.remove();
+  }
 
   const badge = element.querySelector(":scope > .weblayer-badge");
   if (badge) {
@@ -1042,6 +1285,144 @@ function clearWebLayerChanges(element) {
     element.innerText = element.dataset.weblayerOriginalText;
     delete element.dataset.weblayerOriginalText;
   }
+}
+
+function hideContainerForElement(element) {
+  const xPost = element.closest("article[data-testid='tweet']");
+  if (xPost instanceof Element) {
+    // Keep X timeline cells mounted so virtualized lists retain their structure.
+    // The placeholder is inserted next to the article inside the same cell.
+    return xPost;
+  }
+
+  const post = element.closest("article, [role='article']");
+  return post instanceof Element ? post : element;
+}
+
+function collapseHiddenElement(element, command, options = {}) {
+  const wasExpanded = options.expanded === true;
+  element.classList.add("weblayer-hidden");
+  element.classList.toggle("weblayer-hidden--expanded", wasExpanded);
+
+  const placeholder = ensureHiddenPlaceholderSibling(element);
+  updateHiddenPlaceholderExpandedState(placeholder, wasExpanded);
+
+  placeholder.replaceChildren(createHiddenToggle(element, command));
+}
+
+function ensureHiddenPlaceholderSibling(element) {
+  const hiddenId = hiddenIdForElement(element);
+  let placeholder = hiddenPlaceholderForId(hiddenId);
+  if (!placeholder) {
+    placeholder = document.createElement("div");
+    placeholder.className = "weblayer-hidden-placeholder";
+    placeholder.dataset.weblayerUi = "true";
+    placeholder.dataset.weblayerHiddenFor = hiddenId;
+  }
+
+  const parent = element.parentElement;
+  if (parent && (placeholder.parentElement !== parent || placeholder.nextElementSibling !== element)) {
+    parent.insertBefore(placeholder, element);
+  } else if (!parent && placeholder.parentElement !== element) {
+    element.prepend(placeholder);
+  }
+
+  return placeholder;
+}
+
+function hiddenIdForElement(element) {
+  if (!element.dataset.weblayerHiddenId) {
+    element.dataset.weblayerHiddenId = `weblayer-hidden-${nextHiddenId}`;
+    nextHiddenId += 1;
+  }
+  return element.dataset.weblayerHiddenId;
+}
+
+function hiddenPlaceholderForId(hiddenId) {
+  return document.querySelector(
+    `.weblayer-hidden-placeholder[data-weblayer-hidden-for="${cssEscape(hiddenId)}"]`
+  );
+}
+
+function hiddenElementForToggle(toggle) {
+  const placeholder = toggle.closest(".weblayer-hidden-placeholder");
+  const hiddenId = placeholder && placeholder.dataset.weblayerHiddenFor;
+  if (hiddenId) {
+    return document.querySelector(`[data-weblayer-hidden-id="${cssEscape(hiddenId)}"]`);
+  }
+
+  return toggle.closest(".weblayer-hidden");
+}
+
+function createHiddenToggle(element, command) {
+  const toggle = document.createElement("div");
+  const title = document.createElement("span");
+  const detail = document.createElement("span");
+  const action = document.createElement("button");
+  const expanded = element.classList.contains("weblayer-hidden--expanded");
+  const reason = hiddenDetailText(command);
+
+  toggle.className = "weblayer-hidden-toggle";
+  toggle.dataset.weblayerUi = "true";
+
+  title.className = "weblayer-hidden-title";
+  title.dataset.weblayerUi = "true";
+  title.textContent = "Hidden by WebLayer";
+
+  detail.className = "weblayer-hidden-detail";
+  detail.dataset.weblayerUi = "true";
+  detail.dataset.weblayerHiddenReason = reason;
+  detail.textContent = expanded ? expandedHiddenDetailText(reason) : reason;
+
+  action.className = "weblayer-hidden-action";
+  action.dataset.weblayerUi = "true";
+  action.type = "button";
+  action.setAttribute("aria-expanded", expanded ? "true" : "false");
+  action.title = expanded ? "Hide this WebLayer-hidden post again" : "Show WebLayer-hidden post";
+  action.textContent = expanded ? "Hide" : "Show";
+
+  toggle.append(title, detail, action);
+  return toggle;
+}
+
+function toggleHiddenElementExpanded(element) {
+  element.classList.toggle("weblayer-hidden--expanded");
+  const hiddenId = element.dataset.weblayerHiddenId || "";
+  const placeholder = hiddenId ? hiddenPlaceholderForId(hiddenId) : null;
+  const toggle = placeholder && placeholder.querySelector(".weblayer-hidden-toggle");
+  if (!toggle) {
+    return;
+  }
+
+  const expanded = element.classList.contains("weblayer-hidden--expanded");
+  updateHiddenPlaceholderExpandedState(placeholder, expanded);
+  const detail = toggle.querySelector(".weblayer-hidden-detail");
+  const action = toggle.querySelector(".weblayer-hidden-action");
+  if (detail) {
+    const originalDetail = detail.dataset.weblayerHiddenReason || detail.textContent || "";
+    detail.dataset.weblayerHiddenReason = originalDetail;
+    detail.textContent = expanded && originalDetail
+      ? expandedHiddenDetailText(originalDetail)
+      : originalDetail;
+  }
+  if (action) {
+    action.setAttribute("aria-expanded", expanded ? "true" : "false");
+    action.title = expanded ? "Hide this WebLayer-hidden post again" : "Show WebLayer-hidden post";
+    action.textContent = expanded ? "Hide" : "Show";
+  }
+}
+
+function hiddenDetailText(command) {
+  const value = command.reason || command.label || "";
+  return value ? String(value) : "Click to show the post.";
+}
+
+function expandedHiddenDetailText(detail) {
+  return detail ? `Shown now - ${detail}` : "Shown now.";
+}
+
+function updateHiddenPlaceholderExpandedState(placeholder, expanded) {
+  placeholder.classList.toggle("weblayer-hidden-placeholder--expanded", expanded);
 }
 
 function replaceRegionText(element, replacementText) {

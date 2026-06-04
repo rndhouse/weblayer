@@ -125,8 +125,8 @@ are queued, or when at least one queued feedback row exists and 20 more post
 encounters have been stored since the last curation run.
 
 Cache hits and X posts sent to the Codex app-server are logged at debug level
-on stdout. Repeated full captured post payloads from DOM extraction are logged
-at trace level.
+on stdout. Captured DOM regions are logged as compact page URL and identifier
+fields when `WEBLAYER_LOG_CAPTURED_CONTENT=1` is enabled.
 
 ## Codex E2E Tests
 
@@ -168,7 +168,6 @@ WEBLAYER_CODEX_RULE_PROPOSAL_TIMEOUT_MS=120000
 WEBLAYER_CODEX_CWD=/path/to/project
 WEBLAYER_DATA_DIR=/home/user/.local/share/weblayer
 WEBLAYER_LOG_CAPTURED_CONTENT=0
-WEBLAYER_X_DEBUG_STATS=0
 WEBLAYER_X_RESET_DB=0
 WEBLAYER_X_SUMMARY_CACHE_MAX_ENTRIES=10000
 WEBLAYER_X_SUMMARY_CACHE_TTL_SECS=86400
@@ -178,13 +177,14 @@ RUST_LOG=debug
 ## API Reference
 
 - `GET /health`
-- `GET /dashboard`
-- `GET /dashboard/posts`
-- `GET /dashboard/proposals/{id}`
-- `GET /dashboard/rules/{id}`
+- `GET /x.com/dashboard`
+- `GET /x.com/dashboard/posts`
+- `GET /x.com/dashboard/proposals/{id}`
+- `GET /x.com/dashboard/rules/{id}`
 - `GET /v1/events`
 - `POST /v1/dom/analyze`
 - `POST /v1/dom/feedback`
+- `POST /v1/dom/exposures`
 - `GET /v1/content?site=x.com&q=codex`
 - `GET /v1/content/annotations?site=x.com&storageKey=x:id:123`
 - `POST /v1/content/annotations?site=x.com`
@@ -210,10 +210,12 @@ identified posts, then receives `final` commands after local analysis finishes.
 `/v1/dom/analyze` is the REST smoke-test path. It accepts the same DOM snapshot
 shape and returns final DOM commands in one response. `/v1/dom/feedback`
 records `thumbsDown`, `undoThumbsDown`, and `updateReason` signals for one DOM
-region. Feedback controls include an opaque `feedbackContextId`; the extension
-echoes that ID back, and the daemon resolves it to the stored rule context that
-was in play. Site-scoped inspection endpoints keep the path generic and take
-the site scope through the `site` query parameter. `/v1/content` lists recent
+region. `/v1/dom/exposures` records browser-reported viewport exposure events
+for content that was actually on screen. Feedback controls include an opaque
+`feedbackContextId`; the extension echoes that ID back, and the daemon resolves
+it to the stored rule context that was in play. Site-scoped inspection endpoints
+keep the path generic and take the site scope through the `site` query
+parameter. `/v1/content` lists recent
 stored content or searches it with SQLite FTS5 when `q` is provided.
 `/v1/content/stats` returns unique stored content rows and total captured
 encounters for the selected site. `/v1/feedback` lists stored user feedback
@@ -289,7 +291,7 @@ The response stores and returns the curation record with actions such as
 for rules changed by that run. Actionable records are applied automatically and
 stored with status `applied`; records that contain only `noChange` are stored
 with status `dismissed`. Review the result after the fact through
-`/dashboard/proposals/{id}` or `GET /v1/rule-proposals/{id}`.
+`/x.com/dashboard/proposals/{id}` or `GET /v1/rule-proposals/{id}`.
 
 Content annotation request shape:
 
@@ -372,12 +374,11 @@ DOM analysis response shape:
 daemon-side lookup key for active rule snapshots and item-specific decision
 metadata.
 
-When `WEBLAYER_X_DEBUG_STATS=1`, X/Twitter command responses also include a
-`showDebugStats` command. The command carries a `debugStats` payload with
-daemon-side storage, feedback, rule curation, and rule-catch counters for a
-debug sidebar section. The sidebar links to `/dashboard`, a local daemon page
-that summarizes X content stats, active rules, active feedback, and recent
-rule proposals.
+X/Twitter command responses include a `showDebugStats` command. The command
+carries a `debugStats` payload with daemon-side storage, feedback, rule
+curation, and rule-catch counters for a sidebar stats section. The sidebar links
+to `/x.com/dashboard`, a local daemon page that summarizes X content stats,
+active rules, active feedback, and recent rule proposals.
 
 WebSocket request shape:
 

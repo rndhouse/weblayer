@@ -24,7 +24,6 @@ use tokio::sync::Mutex;
 use tower_http::cors::{Any, CorsLayer};
 
 const LOG_CAPTURED_CONTENT_ENV: &str = "WEBLAYER_LOG_CAPTURED_CONTENT";
-const X_DEBUG_STATS_ENV: &str = "WEBLAYER_X_DEBUG_STATS";
 
 /// Builds the daemon HTTP router.
 pub fn router() -> Result<Router, StorageError> {
@@ -32,22 +31,25 @@ pub fn router() -> Result<Router, StorageError> {
         ai_analyzer: AiAnalyzer::from_env(),
         content_store: ContentStore::from_env()?,
         log_captured_content: captured_content_logging_enabled(),
-        x_debug_stats: x_debug_stats_enabled(),
         rule_curation: Arc::new(Mutex::new(())),
     };
 
     Ok(Router::new()
         .route("/health", get(health))
-        .route("/dashboard", get(dashboard::dashboard))
-        .route("/dashboard/posts", get(dashboard::posts_dashboard))
+        .route("/x.com/dashboard", get(dashboard::dashboard))
+        .route("/x.com/dashboard/posts", get(dashboard::posts_dashboard))
         .route(
-            "/dashboard/proposals/{proposal_id}",
+            "/x.com/dashboard/proposals/{proposal_id}",
             get(dashboard::proposal_dashboard),
         )
-        .route("/dashboard/rules/{rule_id}", get(dashboard::rule_dashboard))
+        .route(
+            "/x.com/dashboard/rules/{rule_id}",
+            get(dashboard::rule_dashboard),
+        )
         .route("/v1/events", get(events::events_ws))
         .route("/v1/dom/analyze", post(dom::analyze_dom))
         .route("/v1/dom/feedback", post(dom::dom_feedback))
+        .route("/v1/dom/exposures", post(dom::dom_exposures))
         .route("/v1/content", get(content::content))
         .route(
             "/v1/content/annotations",
@@ -79,6 +81,10 @@ pub fn router() -> Result<Router, StorageError> {
             post(rules::update_rule_status),
         )
         .route("/v1/rules/{rule_id}/catches", get(rules::rule_catches))
+        .route(
+            "/v1/rules/{rule_id}/catches/{event_id}/correction",
+            post(rules::correct_rule_catch),
+        )
         .route("/v1/rules/{rule_id}/validate", get(rules::validate_rule))
         .with_state(state)
         .layer(cors_layer()))
@@ -87,11 +93,6 @@ pub fn router() -> Result<Router, StorageError> {
 /// Returns whether captured DOM snapshots should be emitted as structured logs.
 pub fn captured_content_logging_enabled() -> bool {
     env_flag_default(LOG_CAPTURED_CONTENT_ENV, false)
-}
-
-/// Returns whether X/Twitter debug stats should be rendered in browser pages.
-pub fn x_debug_stats_enabled() -> bool {
-    env_flag_default(X_DEBUG_STATS_ENV, false)
 }
 
 fn cors_layer() -> CorsLayer {
@@ -120,7 +121,6 @@ struct AppState {
     ai_analyzer: AiAnalyzer,
     content_store: ContentStore,
     log_captured_content: bool,
-    x_debug_stats: bool,
     rule_curation: Arc<Mutex<()>>,
 }
 

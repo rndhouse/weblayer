@@ -113,6 +113,29 @@ pub struct ContentStats {
     pub last_seen_at_unix_ms: Option<i64>,
 }
 
+/// Browser-reported viewport exposure for one X/Twitter content item.
+#[derive(Debug, Clone)]
+pub struct XViewportExposureInput {
+    /// Content item extracted from the exposed DOM region.
+    pub item: ContentItem,
+    /// Browser page URL where the exposure occurred.
+    pub page_url: String,
+    /// Client-side timestamp when the item first crossed the exposure threshold.
+    pub first_visible_at: Option<String>,
+    /// Client-side timestamp when this exposure report ended.
+    pub last_visible_at: Option<String>,
+    /// Milliseconds above the exposure threshold for this report.
+    pub visible_duration_ms: u64,
+    /// Highest intersection ratio observed during this report.
+    pub max_visible_ratio: f64,
+    /// Browser viewport width at report time.
+    pub viewport_width: Option<i64>,
+    /// Browser viewport height at report time.
+    pub viewport_height: Option<i64>,
+    /// Source that recorded this exposure.
+    pub source: String,
+}
+
 /// Stored author-level state used to decide whether an X/Twitter author needs review.
 #[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -180,6 +203,46 @@ pub struct RuleCatch {
     pub source: String,
     /// Stored content attached to the decision event.
     pub content: StoredContentItem,
+    /// User correction when this caught instance was marked as a false positive.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub correction: Option<ContentAnnotation>,
+}
+
+/// Input for marking one rule catch as a false positive.
+#[derive(Debug, Clone)]
+pub struct RuleCatchCorrectionInput {
+    /// Rule that should not have matched this event.
+    pub rule_id: String,
+    /// Decision event ID from a rule catch row.
+    pub event_id: i64,
+    /// User-facing reason for the correction.
+    pub reason: String,
+    /// Source making the correction.
+    pub source: String,
+}
+
+/// Result of marking one rule catch as a false positive.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleCatchCorrection {
+    /// Rule that was removed from the caught event.
+    pub rule_id: String,
+    /// Decision event that was corrected.
+    pub event_id: i64,
+    /// Stable storage key for the corrected post.
+    pub storage_key: String,
+    /// Site-native content ID when known.
+    pub content_id: Option<String>,
+    /// Correction timestamp.
+    pub corrected_at_unix_ms: i64,
+    /// Whether the decision event was removed after this rule ID was removed.
+    pub removed_event: bool,
+    /// Rule IDs still attached to the event, if any.
+    pub remaining_matched_rule_ids: Vec<String>,
+    /// Durable correction annotation.
+    pub annotation: ContentAnnotation,
+    /// Rule after adding the negative example when useful.
+    pub rule: ContentRule,
 }
 
 /// Queue and browsing counters used to decide when rule curation should run.
@@ -247,6 +310,9 @@ pub struct StoredContentItem {
     pub seen_count: i64,
     /// Latest client-side capture timestamp.
     pub latest_captured_at: Option<String>,
+    /// Extra capture data retained when structural parsing failed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capture_diagnostics: Option<Value>,
 }
 
 /// Agent- or user-supplied metadata to attach to one stored content item.
@@ -741,6 +807,27 @@ impl ContentStore {
         db.record_batch(batch)
     }
 
+    /// Stores browser viewport exposures for X/Twitter content.
+    pub fn record_x_viewport_exposures(
+        &self,
+        exposures: &[XViewportExposureInput],
+    ) -> Result<usize> {
+        let mut db = self
+            .x_com
+            .lock()
+            .expect("X storage mutex should not be poisoned");
+        db.record_viewport_exposures(exposures)
+    }
+
+    /// Returns the number of browser viewport exposure events stored for X/Twitter.
+    pub fn x_viewport_exposure_count(&self) -> Result<usize> {
+        let db = self
+            .x_com
+            .lock()
+            .expect("X storage mutex should not be poisoned");
+        db.viewport_exposure_count()
+    }
+
     /// Stores user feedback with feedback-time rule context.
     pub fn record_x_feedback_with_context(
         &self,
@@ -973,6 +1060,18 @@ impl ContentStore {
         db.record_decision_event(item, decision, source)
     }
 
+    /// Returns the most recent hide decision previously recorded for one X/Twitter item.
+    pub fn x_latest_hide_decision(
+        &self,
+        item: &ContentItem,
+    ) -> Result<Option<crate::core::ContentDecision>> {
+        let db = self
+            .x_com
+            .lock()
+            .expect("X storage mutex should not be poisoned");
+        db.latest_hide_decision(item)
+    }
+
     /// Returns aggregate X/Twitter rule decision statistics.
     pub fn x_rule_decision_stats(&self) -> Result<Vec<RuleDecisionStats>> {
         let db = self
@@ -989,6 +1088,18 @@ impl ContentStore {
             .lock()
             .expect("X storage mutex should not be poisoned");
         db.rule_catches(id, query)
+    }
+
+    /// Marks one X/Twitter rule catch as a user-corrected false positive.
+    pub fn x_correct_rule_catch(
+        &self,
+        input: RuleCatchCorrectionInput,
+    ) -> Result<Option<RuleCatchCorrection>> {
+        let mut db = self
+            .x_com
+            .lock()
+            .expect("X storage mutex should not be poisoned");
+        db.correct_rule_catch(input)
     }
 
     /// Lists or searches stored X/Twitter content.

@@ -21,7 +21,7 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>WebLayer Dashboard</title>
+  <title>WebLayer X.com Dashboard</title>
   <style>
     :root {
       color-scheme: light dark;
@@ -164,8 +164,31 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
     }
 
     .stat-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
       color: var(--muted);
       font-size: 12px;
+    }
+
+    .info-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 15px;
+      height: 15px;
+      border: 1px solid rgba(125, 211, 252, 0.65);
+      border-radius: 50%;
+      color: var(--accent);
+      font-size: 10px;
+      font-weight: 700;
+      line-height: 1;
+      cursor: help;
+      user-select: none;
+    }
+
+    .info-icon:hover {
+      background: rgba(125, 211, 252, 0.12);
     }
 
     .stat-value {
@@ -258,15 +281,15 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
 <body>
   <main>
     <header>
-      <h1>WebLayer Dashboard</h1>
+      <h1>WebLayer X.com Dashboard</h1>
       <div id="updated" class="meta">Loading...</div>
     </header>
 
     <section class="grid" aria-label="X stats">
-      <a class="stat stat-link" href="/dashboard/posts"><div class="stat-label">Unique posts</div><div id="uniquePosts" class="stat-value">-</div></a>
-      <div class="stat"><div class="stat-label">Post encounters</div><div id="postEncounters" class="stat-value">-</div></div>
-      <div class="stat"><div class="stat-label">Active feedback</div><div id="activeFeedback" class="stat-value">-</div></div>
-      <div class="stat"><div class="stat-label">Active rules</div><div id="activeRules" class="stat-value">-</div></div>
+      <a class="stat stat-link" href="/x.com/dashboard/posts"><div class="stat-label">Unique posts <span class="info-icon" title="Distinct stored X posts. Click this card to browse the stored posts." aria-label="Distinct stored X posts. Click this card to browse the stored posts.">i</span></div><div id="uniquePosts" class="stat-value">-</div></a>
+      <div class="stat"><div class="stat-label">Post encounters <span class="info-icon" title="Total stored captures of X posts. This can rise when X re-renders visible posts, even without scrolling." aria-label="Total stored captures of X posts. This can rise when X re-renders visible posts, even without scrolling.">i</span></div><div id="postEncounters" class="stat-value">-</div></div>
+      <div class="stat"><div class="stat-label">Active feedback <span class="info-icon" title="Current unresolved thumbs-down feedback rows that still influence rule review." aria-label="Current unresolved thumbs-down feedback rows that still influence rule review.">i</span></div><div id="activeFeedback" class="stat-value">-</div></div>
+      <div class="stat"><div class="stat-label">Active rules <span class="info-icon" title="Content rules currently used when WebLayer decides what to do with captured posts." aria-label="Content rules currently used when WebLayer decides what to do with captured posts.">i</span></div><div id="activeRules" class="stat-value">-</div></div>
     </section>
 
     <section class="layout">
@@ -379,7 +402,7 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
     }
 
     function renderRule(rule) {
-      const href = `/dashboard/rules/${encodeURIComponent(rule.id)}`;
+      const href = `/x.com/dashboard/rules/${encodeURIComponent(rule.id)}`;
       return item(rule.title, rule.instruction, `p${rule.priority}`, href);
     }
 
@@ -450,7 +473,7 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
             proposal.id,
             proposalSummary(proposal),
             proposal.status,
-            `/dashboard/proposals/${encodeURIComponent(proposal.id)}`
+            `/x.com/dashboard/proposals/${encodeURIComponent(proposal.id)}`
           ),
           "No recent rule changes."
         );
@@ -649,6 +672,75 @@ const RULE_DASHBOARD_HTML: &str = r##"<!doctype html>
       color: var(--accent);
     }
 
+    .item-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .action-button {
+      min-height: 30px;
+      padding: 0 10px;
+      border: 1px solid var(--accent);
+      border-radius: 6px;
+      background: transparent;
+      color: var(--accent);
+      cursor: pointer;
+      font: inherit;
+      font-weight: 700;
+    }
+
+    .action-button:hover,
+    .action-button:focus-visible {
+      background: rgba(125, 211, 252, 0.12);
+      outline: none;
+    }
+
+    .action-button:disabled {
+      border-color: var(--border);
+      color: var(--muted);
+      cursor: wait;
+    }
+
+    .secondary-button {
+      border-color: var(--border);
+      color: var(--muted);
+    }
+
+    .correction-form {
+      display: grid;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .correction-form[hidden] {
+      display: none;
+    }
+
+    .correction-label {
+      color: var(--text);
+      font-weight: 700;
+    }
+
+    .correction-input {
+      width: 100%;
+      min-height: 76px;
+      padding: 10px;
+      border: 1px solid rgba(148, 163, 184, 0.28);
+      border-radius: 6px;
+      background: rgba(15, 23, 42, 0.42);
+      color: var(--text);
+      font: inherit;
+      line-height: 1.45;
+      resize: vertical;
+    }
+
+    .correction-input:focus {
+      border-color: var(--accent);
+      outline: none;
+    }
+
     .empty, .error {
       color: var(--muted);
       padding: 10px;
@@ -685,7 +777,7 @@ const RULE_DASHBOARD_HTML: &str = r##"<!doctype html>
 <body>
   <main>
     <header>
-      <a href="/dashboard">Dashboard</a>
+      <a href="/x.com/dashboard">Dashboard</a>
       <h1 id="ruleTitle">Rule</h1>
       <div id="ruleMeta" class="meta">Loading...</div>
     </header>
@@ -705,6 +797,7 @@ const RULE_DASHBOARD_HTML: &str = r##"<!doctype html>
         </div>
         <div class="panel">
           <h2>Caught Instances</h2>
+          <div id="catchCorrectionStatus" class="meta" aria-live="polite"></div>
           <div id="catches" class="list"></div>
         </div>
       </div>
@@ -729,6 +822,21 @@ const RULE_DASHBOARD_HTML: &str = r##"<!doctype html>
 
     async function json(path) {
       const response = await fetch(path, { headers: { "Accept": "application/json" } });
+      if (!response.ok) {
+        throw new Error(`${path} returned HTTP ${response.status}`);
+      }
+      return response.json();
+    }
+
+    async function postJson(path, body) {
+      const response = await fetch(path, {
+        method: "POST",
+        headers: {
+          "Accept": "application/json",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(body)
+      });
       if (!response.ok) {
         throw new Error(`${path} returned HTTP ${response.status}`);
       }
@@ -795,6 +903,10 @@ const RULE_DASHBOARD_HTML: &str = r##"<!doctype html>
       return container;
     }
 
+    function setCatchCorrectionStatus(message) {
+      document.getElementById("catchCorrectionStatus").textContent = message;
+    }
+
     function line(label, value, options = {}) {
       const node = document.createElement("div");
       const labelNode = document.createElement("span");
@@ -821,7 +933,27 @@ const RULE_DASHBOARD_HTML: &str = r##"<!doctype html>
       return details;
     }
 
+    function captureDiagnosticsDetails(diagnostics) {
+      if (!diagnostics || typeof diagnostics !== "object") {
+        return null;
+      }
+
+      const details = document.createElement("details");
+      const summary = document.createElement("summary");
+      const value = document.createElement("div");
+
+      details.className = "raw-capture";
+      summary.textContent = "Parse diagnostics";
+      value.className = "post-text";
+      value.textContent = JSON.stringify(diagnostics, null, 2);
+      details.append(summary, value);
+      return details;
+    }
+
     function catchPill(entry) {
+      if (entry.correction) {
+        return "resolved";
+      }
       const confidence = typeof entry.confidence === "number"
         ? `${Math.round(entry.confidence * 100)}%`
         : "";
@@ -860,6 +992,10 @@ const RULE_DASHBOARD_HTML: &str = r##"<!doctype html>
       if (capturedText.changed) {
         body.append(rawCaptureDetails(content.text));
       }
+      const diagnostics = captureDiagnosticsDetails(content.captureDiagnostics);
+      if (diagnostics) {
+        body.append(diagnostics);
+      }
       if (content.url) {
         const link = document.createElement("a");
         link.href = content.url;
@@ -871,7 +1007,109 @@ const RULE_DASHBOARD_HTML: &str = r##"<!doctype html>
         linkLine.append(link);
         body.append(linkLine);
       }
+      if (entry.correction) {
+        const correction = entry.correction;
+        const correctionValue = correction.value || {};
+        body.append(
+          line("Status", "Resolved false positive"),
+          line("Correction reason", correctionValue.reason || "No reason recorded.", { block: true }),
+          line("Corrected", formatTime(correction.updatedAtUnixMs)),
+          line("Correction source", correction.source)
+        );
+        return container;
+      }
+      const actions = document.createElement("div");
+      const correctionButton = document.createElement("button");
+      actions.className = "item-actions";
+      correctionButton.className = "action-button";
+      correctionButton.type = "button";
+      correctionButton.textContent = "Wanted to see this";
+      const form = correctionForm(entry, correctionButton);
+      correctionButton.addEventListener("click", () => {
+        form.hidden = !form.hidden;
+        if (!form.hidden) {
+          form.querySelector(".correction-input").focus();
+        }
+      });
+      actions.append(correctionButton);
+      body.append(actions);
+      body.append(form);
       return container;
+    }
+
+    function correctionForm(entry, toggleButton) {
+      const form = document.createElement("form");
+      const label = document.createElement("label");
+      const input = document.createElement("textarea");
+      const controls = document.createElement("div");
+      const submit = document.createElement("button");
+      const cancel = document.createElement("button");
+      const inputId = `correction-reason-${entry.eventId}`;
+
+      form.className = "correction-form";
+      form.hidden = true;
+      label.className = "correction-label";
+      label.htmlFor = inputId;
+      label.textContent = "Why did you want to see it?";
+      input.id = inputId;
+      input.className = "correction-input";
+      input.name = "reason";
+      input.required = true;
+      input.maxLength = 500;
+      input.placeholder = "Useful, relevant, from a source I trust, or not actually matched by this rule.";
+      controls.className = "item-actions";
+      submit.className = "action-button";
+      submit.type = "submit";
+      submit.textContent = "Record correction";
+      cancel.className = "action-button secondary-button";
+      cancel.type = "button";
+      cancel.textContent = "Cancel";
+      cancel.addEventListener("click", () => {
+        form.hidden = true;
+        setCatchCorrectionStatus("");
+      });
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const reason = input.value.replace(/\s+/g, " ").trim();
+        if (!reason) {
+          setCatchCorrectionStatus("Add a reason before recording the correction.");
+          input.focus();
+          return;
+        }
+        void correctCatch(entry, reason, submit, form, toggleButton);
+      });
+      controls.append(submit, cancel);
+      form.append(label, input, controls);
+      return form;
+    }
+
+    async function correctCatch(entry, reason, button, form, toggleButton) {
+      if (!entry || !entry.eventId || button.disabled) {
+        return;
+      }
+
+      button.disabled = true;
+      toggleButton.disabled = true;
+      const originalText = button.textContent;
+      button.textContent = "Recording...";
+      setCatchCorrectionStatus("Recording correction...");
+      try {
+        await postJson(
+          `/v1/rules/${encodeURIComponent(ruleId)}/catches/${encodeURIComponent(entry.eventId)}/correction?site=${encodeURIComponent(SITE)}`,
+          {
+            reason,
+            source: "dashboard:false-positive"
+          }
+        );
+        setCatchCorrectionStatus("Correction recorded.");
+        await load();
+      } catch (error) {
+        button.disabled = false;
+        toggleButton.disabled = false;
+        button.textContent = originalText;
+        form.hidden = false;
+        setCatchCorrectionStatus(error instanceof Error ? error.message : String(error));
+      }
     }
 
     function exampleItems(rule) {
@@ -1170,7 +1408,7 @@ const PROPOSAL_DASHBOARD_HTML: &str = r##"<!doctype html>
 <body>
   <main>
     <header>
-      <a href="/dashboard">Dashboard</a>
+      <a href="/x.com/dashboard">Dashboard</a>
       <h1 id="proposalTitle">Rule Review</h1>
       <div id="proposalMeta" class="meta">Loading...</div>
     </header>
@@ -1295,7 +1533,7 @@ const PROPOSAL_DASHBOARD_HTML: &str = r##"<!doctype html>
 
     function ruleLink(ruleId) {
       const link = document.createElement("a");
-      link.href = `/dashboard/rules/${encodeURIComponent(ruleId)}`;
+      link.href = `/x.com/dashboard/rules/${encodeURIComponent(ruleId)}`;
       link.textContent = ruleId;
       return link;
     }
@@ -1523,6 +1761,16 @@ const POSTS_DASHBOARD_HTML: &str = r##"<!doctype html>
       white-space: pre-wrap;
     }
 
+    .raw-capture {
+      margin-top: 8px;
+      color: var(--muted);
+    }
+
+    .raw-capture summary {
+      cursor: pointer;
+      color: var(--accent);
+    }
+
     .details {
       display: flex;
       flex-wrap: wrap;
@@ -1583,7 +1831,7 @@ const POSTS_DASHBOARD_HTML: &str = r##"<!doctype html>
 <body>
   <main>
     <header>
-      <a href="/dashboard">Dashboard</a>
+      <a href="/x.com/dashboard">Dashboard</a>
       <h1>Stored Posts</h1>
       <div id="summary" class="meta">Loading...</div>
     </header>
@@ -1653,6 +1901,23 @@ const POSTS_DASHBOARD_HTML: &str = r##"<!doctype html>
       return node;
     }
 
+    function captureDiagnosticsDetails(diagnostics) {
+      if (!diagnostics || typeof diagnostics !== "object") {
+        return null;
+      }
+
+      const details = document.createElement("details");
+      const summary = document.createElement("summary");
+      const value = document.createElement("div");
+
+      details.className = "raw-capture";
+      summary.textContent = "Parse diagnostics";
+      value.className = "post-text";
+      value.textContent = JSON.stringify(diagnostics, null, 2);
+      details.append(summary, value);
+      return details;
+    }
+
     function postNode(post) {
       const container = document.createElement("article");
       const heading = document.createElement("div");
@@ -1685,6 +1950,10 @@ const POSTS_DASHBOARD_HTML: &str = r##"<!doctype html>
 
       heading.append(title, pill);
       container.append(heading, body, details);
+      const diagnostics = captureDiagnosticsDetails(post.captureDiagnostics);
+      if (diagnostics) {
+        container.append(diagnostics);
+      }
       return container;
     }
 
@@ -1754,9 +2023,9 @@ mod tests {
 
         assert!(html.contains("/v1/content/stats?site="));
         assert!(html.contains("/v1/rules?site="));
-        assert!(html.contains("/dashboard/posts"));
-        assert!(html.contains("/dashboard/rules/"));
-        assert!(html.contains("/dashboard/proposals/"));
+        assert!(html.contains("/x.com/dashboard/posts"));
+        assert!(html.contains("/x.com/dashboard/rules/"));
+        assert!(html.contains("/x.com/dashboard/proposals/"));
         assert!(html.contains("/v1/feedback?site="));
         assert!(html.contains("/v1/rule-proposals?site="));
         assert!(html.contains("Recent Rule Reviews"));
@@ -1765,6 +2034,8 @@ mod tests {
         assert!(html.contains("No rule changes proposed."));
         assert!(html.contains("Review Rule Set"));
         assert!(html.contains("method: \"POST\""));
+        assert!(html.contains("class=\"info-icon\""));
+        assert!(html.contains("This can rise when X re-renders visible posts"));
     }
 
     #[tokio::test]
@@ -1777,6 +2048,13 @@ mod tests {
         assert!(html.contains("readableCapturedText"));
         assert!(html.contains("Captured text"));
         assert!(html.contains("Raw capture"));
+        assert!(html.contains("Parse diagnostics"));
+        assert!(html.contains("Wanted to see this"));
+        assert!(html.contains("Why did you want to see it?"));
+        assert!(html.contains("Record correction"));
+        assert!(html.contains("Resolved false positive"));
+        assert!(html.contains("Correction reason"));
+        assert!(html.contains("/correction?site="));
     }
 
     #[tokio::test]
@@ -1786,6 +2064,7 @@ mod tests {
         assert!(html.contains("/v1/content?site="));
         assert!(html.contains("Stored Posts"));
         assert!(html.contains("IntersectionObserver"));
+        assert!(html.contains("Parse diagnostics"));
     }
 
     #[tokio::test]

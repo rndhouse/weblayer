@@ -28,6 +28,31 @@ pub(super) fn initialize(connection: &Connection) -> Result<()> {
     CREATE INDEX IF NOT EXISTS tweets_last_seen_at_idx
         ON tweets(last_seen_at_unix_ms);
 
+    CREATE TABLE IF NOT EXISTS content_exposure_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        site TEXT NOT NULL,
+        storage_key TEXT NOT NULL,
+        post_id TEXT,
+        page_url TEXT NOT NULL,
+        client_id TEXT NOT NULL,
+        first_visible_at TEXT,
+        last_visible_at TEXT,
+        visible_duration_ms INTEGER NOT NULL,
+        max_visible_ratio REAL NOT NULL,
+        viewport_width INTEGER,
+        viewport_height INTEGER,
+        created_at_unix_ms INTEGER NOT NULL,
+        source TEXT NOT NULL,
+        snapshot_json TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS content_exposure_events_storage_key_idx
+        ON content_exposure_events(storage_key);
+    CREATE INDEX IF NOT EXISTS content_exposure_events_post_id_idx
+        ON content_exposure_events(post_id);
+    CREATE INDEX IF NOT EXISTS content_exposure_events_created_at_idx
+        ON content_exposure_events(created_at_unix_ms);
+
     CREATE TABLE IF NOT EXISTS content_decision_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         site TEXT NOT NULL,

@@ -7,8 +7,8 @@ use super::{
 use crate::{
     ai::{AiAction, AiAnalyzer, AiOpinion},
     core::{
-        ContentItem, DecisionAction, DomAnalysisBatch, DomAttribute, DomElementSnapshot, DomLink,
-        FeedbackContext, FeedbackKind, PageSnapshot,
+        ContentDecision, ContentItem, DecisionAction, DomAnalysisBatch, DomAttribute,
+        DomElementSnapshot, DomLink, FeedbackContext, FeedbackKind, PageSnapshot,
     },
     storage::{ContentStore, RuleCreateInput, RuleExamples, XAuthorReviewState},
 };
@@ -198,15 +198,28 @@ fn uses_x_post_text_metadata_instead_of_full_article_chrome() {
             .and_then(serde_json::Value::as_str),
         Some("@alice May 31Anyone who used a computer between 1985-2010. What game?25K4K")
     );
+    assert!(extracted[0]
+        .item
+        .metadata
+        .pointer("/xCom/postTextParseFailure")
+        .is_some_and(serde_json::Value::is_null));
 }
 
 #[test]
 fn does_not_use_full_article_chrome_as_post_text() {
-    let element = element(
+    let mut element = element(
         "client-1",
         "The Bowie is America's knife.2:22 AM · Jun 2, 2026 · 232 Views",
         Some("https://x.com/bowie/status/24680"),
     );
+    element.html = Some(
+        r#"<article data-testid="tweet"><div>The Bowie is America's knife.</div><time>2:22 AM</time><span>232 Views</span></article>"#
+            .into(),
+    );
+    element.attributes = vec![DomAttribute {
+        name: "data-testid".into(),
+        value: "tweet".into(),
+    }];
 
     let extracted = extract_items(&batch(vec![element]));
 
@@ -219,6 +232,37 @@ fn does_not_use_full_article_chrome_as_post_text() {
             .pointer("/xCom/snapshotText")
             .and_then(serde_json::Value::as_str),
         Some("The Bowie is America's knife.2:22 AM · Jun 2, 2026 · 232 Views")
+    );
+    let parse_failure = extracted[0]
+        .item
+        .metadata
+        .pointer("/xCom/postTextParseFailure")
+        .expect("parse failure diagnostics should be stored");
+    assert_eq!(
+        parse_failure
+            .get("reason")
+            .and_then(serde_json::Value::as_str),
+        Some("missingTweetText")
+    );
+    assert_eq!(
+        parse_failure
+            .get("html")
+            .and_then(serde_json::Value::as_str),
+        Some(
+            r#"<article data-testid="tweet"><div>The Bowie is America's knife.</div><time>2:22 AM</time><span>232 Views</span></article>"#
+        )
+    );
+    assert_eq!(
+        parse_failure
+            .pointer("/attributes/0/name")
+            .and_then(serde_json::Value::as_str),
+        Some("data-testid")
+    );
+    assert_eq!(
+        parse_failure
+            .pointer("/links/0/href")
+            .and_then(serde_json::Value::as_str),
+        Some("https://x.com/bowie/status/24680")
     );
 }
 
@@ -416,6 +460,78 @@ fn cached_dom_commands_keep_seen_author_without_cached_summary() {
         command.target.client_id == "client-1"
             && matches!(command.action, crate::core::DomCommandAction::Keep)
     }));
+
+    let _ = std::fs::remove_dir_all(data_dir);
+}
+
+#[test]
+fn cached_dom_commands_replay_previous_hide_for_seen_author_rerender() {
+    let (content_store, data_dir) = content_store("seen-author-previous-hide");
+    let initial_item = content_item("old-client", "222", "Previously hidden post");
+    let ai_analyzer = AiAnalyzer::for_tests_with_x_summaries(&[]);
+    content_store
+        .x_create_rule(RuleCreateInput {
+            id: Some("rule-1".into()),
+            status: Some("active".into()),
+            priority: Some(50),
+            title: "Rule one".into(),
+            instruction: "Hide matching posts.".into(),
+            created_source: "test".into(),
+            examples: RuleExamples::default(),
+        })
+        .expect("active rule should create");
+    content_store
+        .record_x_batch(&crate::core::AnalysisBatch::new(
+            "x.com",
+            vec![initial_item.clone()],
+        ))
+        .expect("initial content should store");
+    content_store
+        .record_x_decision_event(
+            &initial_item,
+            &ContentDecision::hide(
+                "old-client",
+                "WebLayer: hidden by rule",
+                "Matched prior rule",
+                0.92,
+            )
+            .with_matched_rule_ids(vec!["rule-1".into()]),
+            "test",
+        )
+        .expect("previous hide decision should store");
+
+    let commands = cached_dom_commands(
+        &batch(vec![element(
+            "new-client",
+            "Previously hidden post",
+            Some("https://x.com/user/status/222"),
+        )]),
+        &ai_analyzer,
+        &content_store,
+    )
+    .expect("seen author with previous hide should not require cached summary");
+
+    let hide = commands
+        .iter()
+        .find(|command| {
+            command.target.client_id == "new-client"
+                && matches!(command.action, crate::core::DomCommandAction::Hide)
+        })
+        .expect("new DOM client should receive the previous hide command");
+    assert_eq!(hide.reason.as_deref(), Some("Matched prior rule"));
+    assert_eq!(hide.matched_rule_ids, vec!["rule-1".to_string()]);
+
+    let stats = content_store
+        .x_rule_decision_stats()
+        .expect("rule stats should load");
+    let rule_stats = stats
+        .iter()
+        .find(|stats| stats.rule_id == "rule-1")
+        .expect("rule stats should include prior rule");
+    assert_eq!(
+        rule_stats.hide_count, 1,
+        "replaying a previous hide command should not record another rule hide event"
+    );
 
     let _ = std::fs::remove_dir_all(data_dir);
 }

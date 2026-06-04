@@ -1,5 +1,70 @@
-.weblayer-hidden {
+.weblayer-hidden:not(.weblayer-hidden--expanded) {
   display: none !important;
+}
+
+.weblayer-hidden-placeholder {
+  display: block !important;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 6px 16px;
+  border-block: 1px solid rgba(83, 100, 113, 0.28);
+  background: rgba(22, 24, 28, 0.72);
+  color: rgb(113, 118, 123);
+  font: 13px/1.35 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.weblayer-hidden-placeholder--expanded {
+  border-block-color: rgba(125, 211, 252, 0.44);
+  background: rgba(29, 155, 240, 0.08);
+}
+
+.weblayer-hidden-toggle {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 28px;
+  margin: 0;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.weblayer-hidden-title {
+  color: rgb(148, 163, 184);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.weblayer-hidden-detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.weblayer-hidden-action {
+  min-height: 24px;
+  margin: 0;
+  padding: 0 8px;
+  border: 1px solid rgba(125, 211, 252, 0.56);
+  border-radius: 999px;
+  background: transparent;
+  color: rgb(125, 211, 252);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.weblayer-hidden-action:hover,
+.weblayer-hidden-action:focus-visible {
+  border-color: rgb(125, 211, 252);
+  background: rgba(125, 211, 252, 0.12);
+  color: rgb(231, 233, 234);
+  outline: none;
 }
 
 .weblayer-dimmed {
@@ -31,20 +96,24 @@
 }
 
 .weblayer-feedback-slot {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: 1 1 0%;
+  flex: 0 0 38px;
   min-width: 0;
+  min-height: 0;
+  max-height: 0;
+  position: relative;
+  align-self: center;
+  overflow: visible;
 }
 
 .weblayer-feedback-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  flex: 0 0 auto;
-  width: 34px;
-  height: 34px;
+  position: absolute;
+  top: -16px;
+  left: 0;
+  width: 32px;
+  height: 32px;
   margin: 0;
   padding: 0;
   border: 0;
@@ -53,11 +122,6 @@
   color: rgb(83, 100, 113);
   cursor: pointer;
   line-height: 1;
-  transform: translateY(3px);
-}
-
-.weblayer-feedback-button--subject {
-  transform: translateY(7px);
 }
 
 .weblayer-feedback-button:hover,
@@ -97,10 +161,8 @@
 
 .weblayer-feedback-panel {
   display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  grid-template-rows: auto auto auto;
-  column-gap: 12px;
-  row-gap: 4px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
   box-sizing: border-box;
   max-width: calc(100% - 32px);
   margin: 2px 16px 10px;
@@ -112,19 +174,21 @@
   font: 13px/1.35 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
+.weblayer-feedback-panel-heading {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
 .weblayer-feedback-panel-label {
-  grid-column: 1;
-  grid-row: 1;
   color: rgb(113, 118, 123);
   font-weight: 600;
 }
 
 .weblayer-feedback-save-status {
-  grid-column: 1;
-  grid-row: 2;
   color: rgb(113, 118, 123);
   font-size: 12px;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .weblayer-feedback-panel[data-weblayer-save-state="saving"] .weblayer-feedback-save-status {
@@ -141,9 +205,6 @@
 
 .weblayer-feedback-reason-chips {
   display: flex;
-  grid-column: 2;
-  grid-row: 1 / 3;
-  align-self: center;
   flex-wrap: wrap;
   gap: 6px;
   min-width: 0;
@@ -177,8 +238,6 @@
 }
 
 .weblayer-feedback-reason-input {
-  grid-column: 1 / -1;
-  grid-row: 3;
   min-width: 0;
   max-width: 100%;
   min-height: 44px;

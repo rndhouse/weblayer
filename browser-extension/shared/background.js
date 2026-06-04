@@ -1,8 +1,9 @@
 const DEFAULT_DAEMON_ORIGIN = "http://127.0.0.1:17891";
 const ANALYZE_PATH = "/v1/dom/analyze";
 const FEEDBACK_PATH = "/v1/dom/feedback";
+const EXPOSURES_PATH = "/v1/dom/exposures";
 const EVENTS_PATH = "/v1/events";
-const DASHBOARD_PATH = "/dashboard";
+const DEFAULT_DASHBOARD_SITE = "x.com";
 const REQUEST_TIMEOUT_MS = 20000;
 const MAX_ELEMENTS_PER_REQUEST = 16;
 const REQUEST_GC_MS = 60000;
@@ -36,6 +37,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "weblayer:feedback") {
     sendFeedback(message)
       .then((commands) => sendResponse({ ok: true, commands }))
+      .catch((error) => {
+        sendResponse({
+          ok: false,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      });
+
+    return true;
+  }
+
+  if (message.type === "weblayer:viewportExposures") {
+    sendViewportExposures(message)
+      .then((result) => sendResponse({ ok: true, ...result }))
       .catch((error) => {
         sendResponse({
           ok: false,
@@ -139,6 +153,25 @@ async function sendFeedback(message) {
   }
 
   return response.commands.map((command) => normalizeCommand(command, settings.daemonOrigin));
+}
+
+async function sendViewportExposures(message) {
+  const exposures = Array.isArray(message.exposures)
+    ? message.exposures.map(normalizeViewportExposure).filter((exposure) => (
+      exposure.element.clientId && exposure.visibleDurationMs > 0
+    ))
+    : [];
+  if (exposures.length === 0) {
+    return { storedCount: 0 };
+  }
+
+  const settings = await getSettings();
+  const page = normalizePage(message.page);
+  const response = await postJson(settings.daemonOrigin, EXPOSURES_PATH, { page, exposures });
+
+  return {
+    storedCount: Number.isFinite(response.storedCount) ? response.storedCount : 0
+  };
 }
 
 function ensureSocket(origin) {
@@ -319,6 +352,18 @@ function normalizeLink(link) {
   };
 }
 
+function normalizeViewportExposure(exposure) {
+  return {
+    element: normalizeElement(exposure && exposure.element),
+    firstVisibleAt: stringOrNull(exposure && exposure.firstVisibleAt),
+    lastVisibleAt: stringOrNull(exposure && exposure.lastVisibleAt),
+    visibleDurationMs: numberOrZero(exposure && exposure.visibleDurationMs),
+    maxVisibleRatio: numberOrZero(exposure && exposure.maxVisibleRatio),
+    viewportWidth: integerOrNull(exposure && exposure.viewportWidth),
+    viewportHeight: integerOrNull(exposure && exposure.viewportHeight)
+  };
+}
+
 function normalizeCommand(command, daemonOrigin = DEFAULT_DAEMON_ORIGIN) {
   const action = stringOrEmpty(command.action);
   const allowedActions = new Set([
@@ -361,10 +406,11 @@ function normalizeDebugStats(stats, daemonOrigin) {
     return null;
   }
 
+  const site = stringOrEmpty(stats.site) || DEFAULT_DASHBOARD_SITE;
   return {
-    site: stringOrEmpty(stats.site),
+    site: site,
     title: stringOrEmpty(stats.title) || "WebLayer stats",
-    dashboardUrl: safeDashboardUrl(stats.dashboardUrl, daemonOrigin),
+    dashboardUrl: safeDashboardUrl(stats.dashboardUrl, daemonOrigin, site),
     generatedAtUnixMs: Number.isFinite(stats.generatedAtUnixMs)
       ? stats.generatedAtUnixMs
       : null,
@@ -376,7 +422,7 @@ function normalizeDebugStats(stats, daemonOrigin) {
   };
 }
 
-function safeDashboardUrl(value, daemonOrigin) {
+function safeDashboardUrl(value, daemonOrigin, site) {
   const normalizedOrigin = normalizeOrigin(daemonOrigin);
   const candidate = stringOrNull(value);
 
@@ -391,11 +437,16 @@ function safeDashboardUrl(value, daemonOrigin) {
     }
   }
 
-  return dashboardUrl(normalizedOrigin);
+  return dashboardUrl(normalizedOrigin, site);
 }
 
-function dashboardUrl(origin) {
-  return `${normalizeOrigin(origin)}${DASHBOARD_PATH}`;
+function dashboardUrl(origin, site) {
+  return `${normalizeOrigin(origin)}${dashboardPath(site)}`;
+}
+
+function dashboardPath(site) {
+  const normalizedSite = stringOrEmpty(site) || DEFAULT_DASHBOARD_SITE;
+  return `/${encodeURIComponent(normalizedSite)}/dashboard`;
 }
 
 function normalizeDebugStatsSection(section) {
@@ -503,6 +554,14 @@ function stringOrEmpty(value) {
 
 function stringOrNull(value) {
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function numberOrZero(value) {
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function integerOrNull(value) {
+  return Number.isInteger(value) ? value : null;
 }
 
 function objectOrNull(value) {

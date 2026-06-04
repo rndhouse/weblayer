@@ -65,8 +65,8 @@ Content-Type: application/json
 ```
 
 Supported DOM command actions are `keep`, `hide`, `dim`, `insertLabel`,
-`insertFeedbackControl`, `replaceText`, and `showDebugStats`. The daemon emits
-`showDebugStats` only when X debug stats are enabled. On X pages the extension
+`insertFeedbackControl`, `replaceText`, and `showDebugStats`. On X pages the
+daemon emits `showDebugStats` in ordinary command responses. The extension
 renders that payload in the right sidebar when the sidebar is available, with a
 link to the local daemon dashboard.
 

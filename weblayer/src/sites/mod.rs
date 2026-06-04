@@ -1,6 +1,6 @@
 use crate::{
     ai::AiAnalyzer,
-    core::{DomAnalysisBatch, DomCommand, FeedbackKind},
+    core::{DomAnalysisBatch, DomCommand, FeedbackKind, ViewportExposureBatch},
     storage::{ContentStore, StorageError},
 };
 
@@ -61,6 +61,19 @@ pub async fn analyze_dom(
             x_com::analyze_dom(batch, ai_analyzer, content_store).await
         }
         _ => Vec::new(),
+    }
+}
+
+/// Records browser viewport exposure events through the matching site handler.
+pub fn record_viewport_exposures(
+    batch: &ViewportExposureBatch,
+    content_store: &ContentStore,
+) -> Result<usize, StorageError> {
+    match page_host(&batch.page.url).as_deref() {
+        Some("x.com") | Some("twitter.com") => {
+            x_com::record_viewport_exposures(batch, content_store)
+        }
+        _ => Ok(0),
     }
 }
 

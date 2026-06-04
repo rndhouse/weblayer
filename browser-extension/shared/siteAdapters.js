@@ -2,6 +2,18 @@
   const X_COM_HOSTS = new Set(["x.com", "www.x.com", "twitter.com", "www.twitter.com"]);
   const X_COM_POST_SELECTOR = "article[data-testid='tweet']";
   const X_COM_STATUS_PATH = /^\/[A-Za-z0-9_]{1,15}\/status\/\d+(?:\/.*)?$/;
+  const X_COM_PROFILE_PATH = /^\/[A-Za-z0-9_]{1,15}(?:\/(?:with_replies|media|highlights))?$/;
+  const X_COM_RESERVED_TOP_LEVEL_PATHS = new Set([
+    "bookmarks",
+    "compose",
+    "i",
+    "jobs",
+    "lists",
+    "messages",
+    "notifications",
+    "premium",
+    "settings"
+  ]);
 
   function current(locationValue = window.location, root = document) {
     let url;
@@ -51,8 +63,20 @@
     if (X_COM_STATUS_PATH.test(path)) {
       return "statusThread";
     }
+    if (isXComProfilePath(path)) {
+      return "profileTimeline";
+    }
 
     return null;
+  }
+
+  function isXComProfilePath(path) {
+    if (!X_COM_PROFILE_PATH.test(path)) {
+      return false;
+    }
+
+    const topLevelPath = path.split("/")[1] || "";
+    return !X_COM_RESERVED_TOP_LEVEL_PATHS.has(topLevelPath.toLowerCase());
   }
 
   function collectXComCandidates(root) {
@@ -62,12 +86,18 @@
   function xComDebugStatsMount(root) {
     const sidebar = root.querySelector("[data-testid='sidebarColumn']");
     if (sidebar instanceof Element && isVisibleElement(sidebar)) {
-      return xComSidebarContentMount(sidebar) || sidebar;
+      const contentMount = xComSidebarContentMount(sidebar);
+      return contentMount
+        ? { element: contentMount, placement: "before" }
+        : { element: sidebar, placement: "prepend" };
     }
 
     for (const element of root.querySelectorAll("aside, [role='complementary']")) {
       if (element instanceof Element && isVisibleElement(element)) {
-        return xComSidebarContentMount(element) || element;
+        const contentMount = xComSidebarContentMount(element);
+        return contentMount
+          ? { element: contentMount, placement: "before" }
+          : { element, placement: "prepend" };
       }
     }
 
@@ -77,7 +107,7 @@
   function xComSidebarContentMount(sidebar) {
     const timeline = sidebar.querySelector("[aria-label^='Timeline:']");
     if (timeline instanceof Element && isVisibleElement(timeline)) {
-      return timeline;
+      return xComSidebarModuleForElement(sidebar, timeline);
     }
 
     for (const child of sidebar.children) {
@@ -91,6 +121,45 @@
     }
 
     return null;
+  }
+
+  function xComSidebarModuleForElement(sidebar, element) {
+    let current = element;
+    let highestVisible = element;
+    let borderedModule = null;
+
+    while (current instanceof Element && current !== sidebar) {
+      if (
+        !current.matches("[data-weblayer-ui='true']") &&
+        isVisibleElement(current)
+      ) {
+        highestVisible = current;
+        if (xComLooksLikeSidebarModule(current)) {
+          borderedModule = current;
+        }
+      }
+      current = current.parentElement;
+    }
+
+    return borderedModule || highestVisible;
+  }
+
+  function xComLooksLikeSidebarModule(element) {
+    const style = getComputedStyle(element);
+    return (
+      positiveCssPixelValue(style.borderTopWidth) ||
+      positiveCssPixelValue(style.borderRightWidth) ||
+      positiveCssPixelValue(style.borderBottomWidth) ||
+      positiveCssPixelValue(style.borderLeftWidth) ||
+      positiveCssPixelValue(style.borderTopLeftRadius) ||
+      positiveCssPixelValue(style.borderTopRightRadius) ||
+      positiveCssPixelValue(style.borderBottomRightRadius) ||
+      positiveCssPixelValue(style.borderBottomLeftRadius)
+    );
+  }
+
+  function positiveCssPixelValue(value) {
+    return Number.parseFloat(value || "0") > 0;
   }
 
   function xComMetadataForElement(root, url, pageKind, element, snapshot) {

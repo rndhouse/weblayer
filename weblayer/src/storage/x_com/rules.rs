@@ -18,7 +18,7 @@ pub(super) const DEFAULT_RULE_ID: &str = "x-engagement-bait-reaction";
 pub(super) const DEFAULT_RULE_STATUS: &str = "active";
 pub(super) const DEFAULT_RULE_PRIORITY: i64 = 50;
 pub(super) const DEFAULT_RULE_TITLE: &str = "Engagement bait reaction posts";
-pub(super) const DEFAULT_RULE_INSTRUCTION: &str = "Downrank engagement bait, dunking, or 'look at this absurd thing' posts where the main content is a reaction to a video, image, or quote rather than a substantive claim.";
+pub(super) const DEFAULT_RULE_INSTRUCTION: &str = "Hide low-value engagement-bait reaction posts where the main value is outrage, dunking, virality, or 'look at this absurd thing.' Do not hide posts merely because they are reactions, jokes, questions, opinions, or not formal claims, if they contain useful context, a valuable take, original information, or a signal from an important person/account.";
 pub(super) const DEFAULT_RULE_SOURCE: &str = "seed";
 pub(super) const DEFAULT_NEW_RULE_STATUS: &str = "draft";
 pub(super) const DEFAULT_NEW_RULE_PRIORITY: i64 = 100;
@@ -265,13 +265,14 @@ impl Store {
                 first_seen_at_unix_ms,
                 last_seen_at_unix_ms,
                 seen_count,
-                latest_captured_at
+                latest_captured_at,
+                latest_payload_json
             FROM tweets
             ORDER BY last_seen_at_unix_ms DESC, storage_key ASC
             ",
         )?;
         let mut matches = Vec::new();
-        let rows = statement.query_map([], |row| content_item_from_row(row, None))?;
+        let rows = statement.query_map([], |row| content_item_from_row(row, None, Some(9)))?;
         for row in rows {
             let content = row?;
             if let Some(rule_match) = matcher.evaluate(content) {

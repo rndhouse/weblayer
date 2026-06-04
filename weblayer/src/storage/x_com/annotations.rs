@@ -175,7 +175,7 @@ impl Store {
     }
 }
 
-fn content_annotation_from_row(row: &Row<'_>) -> rusqlite::Result<ContentAnnotation> {
+pub(super) fn content_annotation_from_row(row: &Row<'_>) -> rusqlite::Result<ContentAnnotation> {
     let value_json: String = row.get(5)?;
     let value = serde_json::from_str(&value_json).map_err(|error| {
         rusqlite::Error::FromSqlConversionFailure(5, rusqlite::types::Type::Text, Box::new(error))

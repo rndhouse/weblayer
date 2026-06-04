@@ -50,6 +50,9 @@ fn extract_item(
         .map(|metadata| metadata_string_list(metadata, "replyingToHandles"))
         .unwrap_or_default();
     let post_text = metadata.and_then(|metadata| metadata_string(metadata, "postText"));
+    let post_text_parse_failure = post_text
+        .is_none()
+        .then(|| post_text_parse_failure(element));
     let relationship = XPostRelationship {
         post_id: post_id.clone(),
         author_handle: author.clone(),
@@ -85,6 +88,7 @@ fn extract_item(
                 "replyAncestorPostIds": relationship.reply_ancestor_post_ids.clone(),
                 "replyingToHandles": relationship.replying_to_handles.clone(),
                 "postText": post_text,
+                "postTextParseFailure": post_text_parse_failure,
                 "snapshotText": element.text,
             },
         }),
@@ -136,6 +140,20 @@ fn metadata_string_list(metadata: &Value, key: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn post_text_parse_failure(element: &DomElementSnapshot) -> Value {
+    json!({
+        "reason": "missingTweetText",
+        "html": &element.html,
+        "attributes": &element.attributes,
+        "links": &element.links,
+        "selector": &element.selector,
+        "tagName": &element.tag_name,
+        "role": &element.role,
+        "snapshotHash": &element.snapshot_hash,
+        "snapshotText": &element.text,
+    })
+}
+
 fn has_post_region_evidence(element: &DomElementSnapshot) -> bool {
     element
         .tag_name
@@ -159,16 +177,14 @@ fn trace_identified_post(item: &ContentItem) {
         return;
     }
 
-    if let Ok(post_json) = serde_json::to_string(item) {
-        trace!(
-            target: "weblayer_daemon::sites::x_com",
-            client_id = item.client_id.as_str(),
-            content_id = item.content_id.as_deref(),
-            url = item.url.as_deref(),
-            post = %post_json,
-            "identified X post"
-        );
-    }
+    trace!(
+        target: "weblayer_daemon::sites::x_com",
+        post_url = item.url.as_deref(),
+        client_id = item.client_id.as_str(),
+        content_id = item.content_id.as_deref(),
+        author = item.author.as_deref(),
+        "identified X post"
+    );
 }
 
 fn find_status_href(element: &DomElementSnapshot) -> Option<String> {

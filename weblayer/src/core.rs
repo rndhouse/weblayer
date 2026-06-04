@@ -112,6 +112,43 @@ pub struct DomElementSnapshot {
     pub metadata: Value,
 }
 
+/// Browser-reported viewport exposure batch for content that was actually on screen.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ViewportExposureBatch {
+    /// Snapshot metadata for the live page.
+    pub page: PageSnapshot,
+    /// Content regions that crossed the browser exposure threshold.
+    #[serde(default)]
+    pub exposures: Vec<ViewportExposure>,
+}
+
+/// One browser viewport exposure for a DOM region.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ViewportExposure {
+    /// DOM region that was exposed.
+    pub element: DomElementSnapshot,
+    /// Client-side timestamp when the region first crossed the exposure threshold.
+    #[serde(default)]
+    pub first_visible_at: Option<String>,
+    /// Client-side timestamp when the reported exposure ended.
+    #[serde(default)]
+    pub last_visible_at: Option<String>,
+    /// Cumulative milliseconds above the exposure threshold for this report.
+    #[serde(default)]
+    pub visible_duration_ms: u64,
+    /// Highest intersection ratio observed during this exposure report.
+    #[serde(default)]
+    pub max_visible_ratio: f64,
+    /// Browser viewport width at report time.
+    #[serde(default)]
+    pub viewport_width: Option<i64>,
+    /// Browser viewport height at report time.
+    #[serde(default)]
+    pub viewport_height: Option<i64>,
+}
+
 /// User feedback signal sent by the browser extension for a DOM region.
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]

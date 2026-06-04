@@ -5,11 +5,11 @@ use super::{
     AppState,
 };
 use crate::storage::{
-    ContentRule, RuleAuditEvent, RuleCatch, RuleCatchQuery, RuleCreateInput, RuleExamples,
-    RuleQuery, RuleSetProposal, RuleSetProposalAction, RuleSetProposalChange,
-    RuleSetProposalCreateInput, RuleSetProposalDecision, RuleSetProposalDecisionResult,
-    RuleSetProposalQuery, RuleStatusInput, RuleSuggestion, RuleSuggestionQuery, RuleUpdateInput,
-    RuleValidationMatch, XDislikeQuery,
+    ContentRule, RuleAuditEvent, RuleCatch, RuleCatchCorrection, RuleCatchCorrectionInput,
+    RuleCatchQuery, RuleCreateInput, RuleExamples, RuleQuery, RuleSetProposal,
+    RuleSetProposalAction, RuleSetProposalChange, RuleSetProposalCreateInput,
+    RuleSetProposalDecision, RuleSetProposalDecisionResult, RuleSetProposalQuery, RuleStatusInput,
+    RuleSuggestion, RuleSuggestionQuery, RuleUpdateInput, RuleValidationMatch, XDislikeQuery,
 };
 use axum::{
     extract::{Path as AxumPath, Query, State},
@@ -427,6 +427,39 @@ pub(super) async fn rule_catches(
     }))
 }
 
+pub(super) async fn correct_rule_catch(
+    State(state): State<AppState>,
+    AxumPath((rule_id, event_id)): AxumPath<(String, i64)>,
+    Query(query): Query<RuleSiteQuery>,
+    Json(request): Json<CorrectRuleCatchRequest>,
+) -> Result<Json<RuleCatchCorrectionResponse>, ApiError> {
+    let site = SiteScope::from_param(query.site.as_deref())?;
+    let reason =
+        clean_query_value(request.reason).unwrap_or_else(|| "Wanted to see this post".into());
+    let source =
+        clean_query_value(request.source).unwrap_or_else(|| "dashboard:false-positive".into());
+    let correction = match site {
+        SiteScope::XCom => state
+            .content_store
+            .x_correct_rule_catch(RuleCatchCorrectionInput {
+                rule_id: rule_id.clone(),
+                event_id,
+                reason,
+                source,
+            })?,
+    }
+    .ok_or_else(|| {
+        ApiError::not_found(format!(
+            "rule catch not found for rule {rule_id} and event {event_id}"
+        ))
+    })?;
+
+    Ok(Json(RuleCatchCorrectionResponse {
+        site: site.as_str(),
+        correction,
+    }))
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct RulesQuery {
@@ -590,6 +623,15 @@ pub(super) struct DecideRuleSetProposalRequest {
     source: Option<String>,
 }
 
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct CorrectRuleCatchRequest {
+    /// Optional user-facing reason for the correction.
+    reason: Option<String>,
+    /// Source making the correction. Defaults to the dashboard.
+    source: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct RuleDetailResponse {
@@ -660,6 +702,13 @@ pub(super) struct RuleCatchesResponse {
     limit: usize,
     offset: usize,
     items: Vec<RuleCatch>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct RuleCatchCorrectionResponse {
+    site: &'static str,
+    correction: RuleCatchCorrection,
 }
 
 fn clean_rule_examples(examples: RuleExamples) -> RuleExamples {
