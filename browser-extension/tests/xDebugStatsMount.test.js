@@ -738,18 +738,22 @@ function testHiddenPostsUseExpandablePlaceholder() {
   );
 
   assert(
-    contentCss.includes(".weblayer-hidden:not(.weblayer-hidden--expanded) {\n  display: none !important;"),
-    "the hidden post container should be hidden only while collapsed"
+    contentCss.includes('.weblayer-hidden:not(.weblayer-hidden--expanded):not([data-weblayer-hidden-mode="inline"])') &&
+      contentCss.includes('.weblayer-hidden[data-weblayer-hidden-mode="inline"]:not(.weblayer-hidden--expanded)') &&
+      contentCss.includes("> :not(.weblayer-hidden-placeholder)") &&
+      contentCss.includes("overflow: visible !important;"),
+    "X hidden posts should keep the article mounted and hide only non-placeholder children while collapsed"
   );
   assert(
     contentCss.includes(".weblayer-hidden-placeholder") &&
       contentCss.includes(".weblayer-hidden-placeholder--expanded") &&
       contentCss.includes(".weblayer-hidden-toggle"),
-    "hidden posts should render a compact sibling placeholder row with an expanded state"
+    "hidden posts should render a compact placeholder row with an expanded state"
   );
   assert(
     contentScript.includes("collapseHiddenElement(element, command") &&
-      contentScript.includes("ensureHiddenPlaceholderSibling(element)") &&
+      contentScript.includes("hiddenModeForElement(element)") &&
+      contentScript.includes("ensureHiddenPlaceholder(element, hiddenMode)") &&
       contentScript.includes("updateHiddenPlaceholderExpandedState(placeholder, expanded)") &&
       contentScript.includes("hiddenElementForToggle(hiddenToggle)") &&
       contentScript.includes("hideContainerForElement(element)") &&
@@ -795,17 +799,27 @@ function testHiddenPostsKeepTimelineCellMounted() {
     "the X timeline cell should stay mounted and visible"
   );
 
-  const placeholder = cell.children[0];
+  const placeholder = article.children[0];
   const action = placeholder.querySelector(".weblayer-hidden-action");
   assert.strictEqual(
-    placeholder.nextElementSibling,
+    cell.children[0],
     article,
-    "the WebLayer placeholder should sit inside the timeline cell before the hidden article"
+    "the X timeline cell should still contain the tweet article at its original slot"
+  );
+  assert.strictEqual(
+    placeholder.nextElementSibling,
+    text,
+    "the WebLayer placeholder should sit inside the tweet article before the post content"
   );
   assert.strictEqual(
     cell.parentElement,
     main,
     "the timeline cell should remain in its original timeline position"
+  );
+  assert.strictEqual(
+    article.dataset.weblayerHiddenMode,
+    "inline",
+    "tweet articles should use inline hidden mode so Show can reveal the article content"
   );
   assert(action, "the placeholder should include a Show/Hide action");
 
@@ -873,12 +887,17 @@ function testHiddenPostsKeepStatusThreadPlaceholderAtArticleSlot() {
     "the broader status-thread cell should not be hidden"
   );
 
-  const placeholder = threadCell.children[1];
+  const placeholder = article.children[0];
   const action = placeholder.querySelector(".weblayer-hidden-action");
   assert.strictEqual(
-    placeholder.nextElementSibling,
+    threadCell.children[1],
     article,
-    "the WebLayer placeholder should sit immediately before the hidden status-thread article"
+    "the status-thread article should remain in its original thread slot"
+  );
+  assert.strictEqual(
+    placeholder.nextElementSibling,
+    text,
+    "the WebLayer placeholder should sit inside the status-thread article before the post content"
   );
 
   const resolvedElement = contentScript.__hiddenElementForToggle(action);

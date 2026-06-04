@@ -1267,6 +1267,7 @@ function clearWebLayerChanges(element) {
     siblingPlaceholder.remove();
   }
   delete element.dataset.weblayerHiddenId;
+  delete element.dataset.weblayerHiddenMode;
 
   const hiddenContent = element.querySelector(":scope > .weblayer-hidden-content");
   if (hiddenContent) {
@@ -1301,16 +1302,22 @@ function hideContainerForElement(element) {
 
 function collapseHiddenElement(element, command, options = {}) {
   const wasExpanded = options.expanded === true;
+  const hiddenMode = hiddenModeForElement(element);
+  element.dataset.weblayerHiddenMode = hiddenMode;
   element.classList.add("weblayer-hidden");
   element.classList.toggle("weblayer-hidden--expanded", wasExpanded);
 
-  const placeholder = ensureHiddenPlaceholderSibling(element);
+  const placeholder = ensureHiddenPlaceholder(element, hiddenMode);
   updateHiddenPlaceholderExpandedState(placeholder, wasExpanded);
 
   placeholder.replaceChildren(createHiddenToggle(element, command));
 }
 
-function ensureHiddenPlaceholderSibling(element) {
+function hiddenModeForElement(element) {
+  return element.matches("article[data-testid='tweet']") ? "inline" : "sibling";
+}
+
+function ensureHiddenPlaceholder(element, hiddenMode) {
   const hiddenId = hiddenIdForElement(element);
   let placeholder = hiddenPlaceholderForId(hiddenId);
   if (!placeholder) {
@@ -1318,6 +1325,13 @@ function ensureHiddenPlaceholderSibling(element) {
     placeholder.className = "weblayer-hidden-placeholder";
     placeholder.dataset.weblayerUi = "true";
     placeholder.dataset.weblayerHiddenFor = hiddenId;
+  }
+
+  if (hiddenMode === "inline") {
+    if (placeholder.parentElement !== element || element.children[0] !== placeholder) {
+      element.prepend(placeholder);
+    }
+    return placeholder;
   }
 
   const parent = element.parentElement;

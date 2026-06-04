@@ -1,5 +1,14 @@
-.weblayer-hidden:not(.weblayer-hidden--expanded) {
+.weblayer-hidden:not(.weblayer-hidden--expanded):not([data-weblayer-hidden-mode="inline"]) {
   display: none !important;
+}
+
+.weblayer-hidden[data-weblayer-hidden-mode="inline"]:not(.weblayer-hidden--expanded)
+  > :not(.weblayer-hidden-placeholder) {
+  display: none !important;
+}
+
+.weblayer-hidden[data-weblayer-hidden-mode="inline"].weblayer-hidden--expanded {
+  overflow: visible !important;
 }
 
 .weblayer-hidden-placeholder {
